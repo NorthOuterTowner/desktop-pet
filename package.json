@@ -1,7 +1,7 @@
 {
   "name": "desktop-cat",
   "productName": "Desktop Cat",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A desktop cat that sits on your taskbar, wanders about and naps",
   "homepage": "https://github.com/NorthOuterTowner/desktop-pet",
   "repository": {
