@@ -96,6 +96,15 @@ dmg:
 linux:
   icon: build/icons
   category: Utility
+  # fpm (the .deb/.rpm builder) refuses to package without a maintainer and a
+  # homepage. Both come from package.json -- author.name + author.email and
+  # homepage -- so they are not repeated here. Override with linux.maintainer if a
+  # package should name someone other than the author.
+  #
+  # Electron takes the Wayland app_id / WM_CLASS from desktopName in package.json;
+  # this makes the installed .desktop file use that same basename, so desktop
+  # environments can tie the running window back to the launcher entry.
+  syncDesktopName: true
   synopsis: A desktop cat that naps on your taskbar
   description: >-
     An Electron desktop pet. A cat sits along the bottom of your screen on top of the

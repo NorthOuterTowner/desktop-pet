@@ -3,12 +3,19 @@
   "productName": "Desktop Cat",
   "version": "1.0.0",
   "description": "A desktop cat that sits on your taskbar, wanders about and naps",
+  "homepage": "https://github.com/NorthOuterTowner/desktop-pet",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NorthOuterTowner/desktop-pet.git"
+  },
   "main": "electron/main.js",
   "private": true,
   "license": "MIT",
   "author": {
-    "name": "desktop-cat"
+    "name": "desktop-cat",
+    "email": "NorthOuterTowner@users.noreply.github.com"
   },
+  "desktopName": "desktop-cat.desktop",
   "scripts": {
     "start": "electron .",
     "assets": "python tools/build_assets.py",
