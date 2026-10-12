@@ -16,6 +16,25 @@ files:
   - assets/sprites/**/*
   - icons/**/*
 
+# ---- Size ----------------------------------------------------------------------------
+# Electron is ~370 MB unpacked and nearly all of that is Chromium, which cannot be
+# removed. These three settings take back the parts that are genuinely unreachable.
+
+# Chromium ships 55 locale files, 48 MB of them. They translate Chromium's own UI --
+# context menus, error pages, print dialogs -- none of which a tray-only pet ever
+# shows. Everything the user reads comes from the app itself. Keeps ~1 MB.
+electronLanguages:
+  - en-US
+  - zh-CN
+
+# Deletes the Direct3D shader compilers, which only WebGPU loads and the cat never
+# uses: another 26 MB. The script lists what it leaves alone, and why.
+afterPack: ./scripts/after-pack.mjs
+
+# LZMA with the largest dictionary. It costs a few minutes of build time and saves a
+# few per cent of the download, which is the part a user actually waits on.
+compression: maximum
+
 asar: true
 # Nothing is unpacked on purpose: every file the app reads at runtime goes through
 # Node's fs (the app:// handler, and the tray icon), which reads straight out of the
