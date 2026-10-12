@@ -1,0 +1,93 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  /* The window is click-through except over the cat's own pixels, which the main
+     process toggles; nothing here should ever capture a drag or a text selection. */
+  user-select: none;
+  cursor: default;
+}
+
+#stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+#cat {
+  position: absolute;
+  left: 0;
+  /* `bottom` is set from JS to the sprite's foot offset so the paws land exactly on
+     the taskbar edge rather than a few pixels above it. The transform carries both
+     the walk position and how high the cat is being held off the floor. */
+  bottom: 0;
+  transform: translate(0, 0);
+  image-rendering: auto;
+  will-change: transform;
+}
+
+body.over-cat {
+  cursor: grab;
+}
+
+body.carrying,
+body.carrying.over-cat {
+  cursor: grabbing;
+}
+
+#hearts {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.heart {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  pointer-events: none;
+  opacity: 0;
+  transform-origin: 50% 50%;
+  animation: heart-float 1250ms cubic-bezier(0.22, 0.68, 0.3, 1) forwards;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.25));
+}
+
+/* Pop in just outside the cat, drift up, fade away. */
+@keyframes heart-float {
+  0% {
+    opacity: 0;
+    transform: translateY(6px) scale(0.45);
+  }
+  18% {
+    opacity: 1;
+    transform: translateY(-4px) scale(1.12);
+  }
+  34% {
+    transform: translateY(-14px) scale(0.98);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-72px) scale(0.9);
+  }
+}
+
+#error {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  max-width: 520px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(24, 24, 30, 0.92);
+  color: #ffd7d7;
+  font: 12px/1.5 Consolas, "Cascadia Mono", monospace;
+  white-space: pre-wrap;
+}

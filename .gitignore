@@ -1,0 +1,26 @@
+# dependencies
+node_modules/
+
+# packaging output. build/ is *not* ignored -- the app icons in there are generated
+# but committed, so that packaging never needs the Python toolchain.
+dist/
+out/
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# QA output from npm run check:app
+rsrc/_check/
+
+# logs
+*.log
+npm-debug.log*
+
+# editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+*.swp

@@ -1,0 +1,9 @@
+# Asset pipeline only (tools/build_assets.py). The pet itself is Electron and needs
+# nothing from Python at runtime -- see `npm start`.
+Pillow==11.1.0
+numpy==2.4.4
+scipy==1.17.1
+
+# Legacy: only the superseded PySide6 pet (main.py + catpet/) needs this. Not required
+# to run or build the Electron app.
+PySide6==6.11.1

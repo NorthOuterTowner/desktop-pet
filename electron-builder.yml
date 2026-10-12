@@ -1,0 +1,125 @@
+appId: dev.desktopcat.app
+copyright: Copyright © desktop-cat contributors
+
+directories:
+  buildResources: build
+  output: dist
+
+# An allow-list, not an ignore-list. The Python sprite pipeline, the raw art in rsrc/
+# and the dev checks are all build-time only; shipping them would bloat every
+# installer for no benefit. Note icons/ is the heart the renderer floats on a click,
+# which is separate from the app icons in build/.
+files:
+  - package.json
+  - electron/**/*
+  - src/**/*
+  - assets/sprites/**/*
+  - icons/**/*
+
+asar: true
+# Nothing is unpacked on purpose: every file the app reads at runtime goes through
+# Node's fs (the app:// handler, and the tray icon), which reads straight out of the
+# archive. Keep it that way -- a native path loader would not see inside it.
+
+# There are no runtime dependencies and nothing native to compile, so skip the rebuild
+# step entirely. CI then needs no C++ toolchain.
+npmRebuild: false
+
+# ---- Windows -------------------------------------------------------------------------
+
+win:
+  icon: build/icon.ico
+  artifactName: ${name}-${version}-win-${arch}-setup.${ext}
+  target:
+    - target: nsis
+      arch:
+        - x64
+        - arm64
+
+nsis:
+  # A real wizard rather than a one-click drop, so the user picks the scope and the
+  # install location and gets a proper entry in Apps & features.
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Desktop Cat
+  runAfterFinish: true
+  # The cat keeps nothing worth losing, but an uninstall that wipes app data without
+  # asking is still the wrong default.
+  deleteAppDataOnUninstall: false
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  installerHeaderIcon: build/icon.ico
+  uninstallDisplayName: ${productName} ${version}
+
+# ---- macOS ---------------------------------------------------------------------------
+
+mac:
+  icon: build/icon.png
+  category: public.app-category.entertainment
+  darkModeSupport: true
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  # Notarising needs an Apple Developer account. Set APPLE_ID,
+  # APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID and flip this to true.
+  notarize: false
+  extendInfo:
+    # The pet lives in the menu bar and has no window to switch to, so it must not
+    # take a Dock tile or appear in the app switcher.
+    LSUIElement: 1
+    NSHighResolutionCapable: true
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+
+dmg:
+  artifactName: ${name}-${version}-mac-${arch}.${ext}
+  title: ${productName} ${version}
+  contents:
+    - x: 150
+      y: 190
+      type: file
+    - x: 420
+      y: 190
+      type: link
+      path: /Applications
+
+# ---- Linux ---------------------------------------------------------------------------
+
+linux:
+  icon: build/icons
+  category: Utility
+  synopsis: A desktop cat that naps on your taskbar
+  description: >-
+    An Electron desktop pet. A cat sits along the bottom of your screen on top of the
+    taskbar, blinks, gets up for a walk, grooms itself and curls up for a nap when you
+    leave it alone. Mouse input passes straight through it everywhere except its own
+    pixels, so it never gets in the way of anything else.
+  target:
+    # deb and rpm install into the system the way a package manager expects. AppImage
+    # is the portable fallback for everything else -- one executable, no install.
+    - target: deb
+      arch:
+        - x64
+        - arm64
+    - target: rpm
+      arch:
+        - x64
+    - target: AppImage
+      arch:
+        - x64
+        - arm64
+
+deb:
+  artifactName: ${name}-${version}-linux-${arch}.${ext}
+rpm:
+  artifactName: ${name}-${version}-linux-${arch}.${ext}
+appImage:
+  artifactName: ${name}-${version}-linux-${arch}.${ext}

@@ -1,0 +1,232 @@
+name: installers
+
+# An installer has to be built on the operating system it installs onto -- a .dmg
+# needs hdiutil, the Linux packagers do not run on Windows -- so the three platforms
+# are built on three runners and only brought together at the end.
+#
+# What a push does:
+#   pull request            build all three, publish nothing
+#   push to main/master     build all three, then release v<package.json version> if
+#                           that release does not exist yet. So bumping the version
+#                           and pushing is all it takes to cut a release.
+#   push of a v* tag        build all three and release under that exact tag
+#   manual run              same as a push to main, with a switch to skip publishing
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish a GitHub release when the build succeeds
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installers-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      # One platform failing should not hide whether the other two are fine.
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows setup .exe
+            os: windows-latest
+            flag: --win
+            artifact: installers-windows
+          - name: macOS .dmg
+            os: macos-latest
+            flag: --mac
+            artifact: installers-macos
+          - name: Linux .deb / .rpm / .AppImage
+            os: ubuntu-latest
+            flag: --linux
+            artifact: installers-linux
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      # The Electron binaries and the packaging tools are ~200 MB per architecture and
+      # never change between runs of the same version.
+      - name: Cache Electron downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+            ~\AppData\Local\electron\Cache
+            ~\AppData\Local\electron-builder\Cache
+          key: electron-${{ matrix.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: electron-${{ matrix.os }}-
+
+      # fpm builds the .deb and the .AppImage by itself, but converts to .rpm by
+      # shelling out to rpmbuild, which is not on the runner image.
+      - name: Install rpmbuild
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y rpm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The same script a developer runs locally. No signing certificates are
+      # configured, so the installers are unsigned -- see README.md for wiring up
+      # CSC_LINK / notarisation.
+      - name: Build installers
+        run: node scripts/build-installers.mjs ${{ matrix.flag }}
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.deb
+            dist/*.rpm
+            dist/*.AppImage
+            dist/*.blockmap
+            dist/SHA256SUMS-*.txt
+            dist/installers-*.json
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish release
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      # To create the release and the tag that goes with it.
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Work out the tag to release
+        id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SKIP: ${{ github.event_name == 'workflow_dispatch' && inputs.publish == false }}
+        run: |
+          set -euo pipefail
+
+          if [ "$SKIP" = "true" ]; then
+            echo "Publishing was switched off for this run."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "${GITHUB_REF}" != "${GITHUB_REF#refs/tags/}" ]; then
+            tag="${GITHUB_REF#refs/tags/}"
+            echo "Tag push: releasing $tag."
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          tag="v$(node -p "require('./package.json').version")"
+          if gh release view "$tag" --json id >/dev/null 2>&1; then
+            # Every push to main lands here. Only a version bump is a new release;
+            # anything else would spam the releases page with duplicates.
+            echo "Release $tag already exists. Bump the version in package.json to"
+            echo "publish a new one, or push a tag."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Version is new: releasing $tag."
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download every platform's installers
+        if: steps.target.outputs.publish == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          path: installers
+          pattern: installers-*
+          merge-multiple: true
+
+      - name: Assemble the release
+        if: steps.target.outputs.publish == 'true'
+        id: assemble
+        env:
+          TAG: ${{ steps.target.outputs.tag }}
+        run: |
+          set -euo pipefail
+          cd installers
+
+          # One checksum file for the release instead of the three the separate
+          # runners each produced.
+          cat SHA256SUMS-*.txt | sort -k2 > SHA256SUMS.txt
+          rm -f SHA256SUMS-*.txt installers-*.json
+
+          echo "Release assets:"
+          ls -lh
+
+          {
+            echo "Installers for Windows, macOS and Linux, built from \`$GITHUB_SHA\`."
+            echo
+            echo "| Platform | Download |"
+            echo "| --- | --- |"
+            echo "| Windows 10/11 | \`*-win-x64-setup.exe\` (\`arm64\` for Windows on ARM) |"
+            echo "| macOS Apple silicon | \`*-mac-arm64.dmg\` |"
+            echo "| macOS Intel | \`*-mac-x64.dmg\` |"
+            echo "| Debian / Ubuntu | \`*-linux-amd64.deb\` |"
+            echo "| Fedora / RHEL | \`*-linux-x86_64.rpm\` |"
+            echo "| Any Linux, no install | \`*-linux-x86_64.AppImage\` |"
+            echo
+            echo "Verify a download against \`SHA256SUMS.txt\`:"
+            echo '```'
+            echo "sha256sum --check --ignore-missing SHA256SUMS.txt"
+            echo '```'
+            echo
+            echo "These builds are not code signed. Windows SmartScreen will warn on"
+            echo "first run, and macOS needs **right-click > Open** the first time, or"
+            echo "\`xattr -dr com.apple.quarantine \"/Applications/Desktop Cat.app\"\`."
+          } > ../notes.md
+
+      - name: Create or update the GitHub release
+        if: steps.target.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.target.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if gh release view "$TAG" --json id >/dev/null 2>&1; then
+            # Re-running a tag build should replace its assets, not fail.
+            echo "Updating the existing $TAG release."
+            gh release upload "$TAG" installers/* --clobber
+            gh release edit "$TAG" --notes-file notes.md
+          else
+            gh release create "$TAG" installers/* \
+              --target "$GITHUB_SHA" \
+              --title "Desktop Cat ${TAG#v}" \
+              --notes-file notes.md
+          fi
+
+          echo "Published: $(gh release view "$TAG" --json url --jq .url)"

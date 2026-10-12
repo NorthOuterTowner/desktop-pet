@@ -1,0 +1,30 @@
+{
+  "name": "desktop-cat",
+  "productName": "Desktop Cat",
+  "version": "1.0.0",
+  "description": "A desktop cat that sits on your taskbar, wanders about and naps",
+  "main": "electron/main.js",
+  "private": true,
+  "license": "MIT",
+  "author": {
+    "name": "desktop-cat"
+  },
+  "scripts": {
+    "start": "electron .",
+    "assets": "python tools/build_assets.py",
+    "assets:probe": "python tools/build_assets.py --probe",
+    "icons": "python tools/build_icons.py",
+    "check:behavior": "node tools/_simulate.mjs",
+    "check:app": "electron . --smoke",
+    "dist": "node scripts/build-installers.mjs",
+    "dist:win": "node scripts/build-installers.mjs --win",
+    "dist:mac": "node scripts/build-installers.mjs --mac",
+    "dist:linux": "node scripts/build-installers.mjs --linux",
+    "dist:all": "node scripts/build-installers.mjs --all",
+    "pack": "node scripts/build-installers.mjs --dir"
+  },
+  "devDependencies": {
+    "electron": "44.7.0",
+    "electron-builder": "26.15.3"
+  }
+}

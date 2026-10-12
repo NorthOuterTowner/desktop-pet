@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; img-src app:; script-src app:; style-src app:; connect-src app:;"
+    />
+    <title>Desktop Cat</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <!-- The window spans the whole work area; the cat moves inside it with a
+         transform so walking never costs an IPC round trip per frame. -->
+    <div id="stage">
+      <div id="hearts" aria-hidden="true"></div>
+      <canvas id="cat" width="160" height="160"></canvas>
+    </div>
+    <div id="error" role="alert" hidden></div>
+    <script type="module" src="renderer.js"></script>
+  </body>
+</html>

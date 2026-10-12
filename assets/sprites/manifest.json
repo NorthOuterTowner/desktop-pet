@@ -1,0 +1,325 @@
+{
+  "canvas": 256,
+  "baseline": 252,
+  "actions": {
+    "sit": {
+      "frames": [
+        "sit/000.png"
+      ],
+      "fps": 1.0,
+      "loop": true,
+      "tags": [
+        "idle",
+        "front"
+      ]
+    },
+    "blink": {
+      "frames": [
+        "blink/000.png",
+        "blink/001.png",
+        "blink/002.png",
+        "blink/003.png",
+        "blink/004.png",
+        "blink/005.png",
+        "blink/006.png"
+      ],
+      "fps": 12.0,
+      "loop": false,
+      "tags": [
+        "accent",
+        "front"
+      ]
+    },
+    "head_tilt": {
+      "frames": [
+        "head_tilt/000.png",
+        "head_tilt/001.png",
+        "head_tilt/002.png",
+        "head_tilt/003.png",
+        "head_tilt/004.png",
+        "head_tilt/005.png",
+        "head_tilt/006.png",
+        "head_tilt/007.png",
+        "head_tilt/008.png"
+      ],
+      "fps": 9.0,
+      "loop": false,
+      "tags": [
+        "reaction",
+        "front"
+      ]
+    },
+    "stand_up": {
+      "frames": [
+        "stand_up/000.png",
+        "stand_up/001.png",
+        "stand_up/002.png",
+        "stand_up/003.png",
+        "stand_up/004.png"
+      ],
+      "fps": 7.0,
+      "loop": false,
+      "tags": [
+        "transition",
+        "front"
+      ]
+    },
+    "sit_down": {
+      "frames": [
+        "sit_down/000.png",
+        "sit_down/001.png",
+        "sit_down/002.png",
+        "sit_down/003.png",
+        "sit_down/004.png"
+      ],
+      "fps": 7.0,
+      "loop": false,
+      "tags": [
+        "transition",
+        "front"
+      ]
+    },
+    "stand": {
+      "frames": [
+        "stand/000.png"
+      ],
+      "fps": 1.0,
+      "loop": true,
+      "tags": [
+        "idle",
+        "front"
+      ]
+    },
+    "turn_left": {
+      "frames": [
+        "turn_left/000.png",
+        "turn_left/001.png",
+        "turn_left/002.png",
+        "turn_left/003.png"
+      ],
+      "fps": 8.0,
+      "loop": false,
+      "tags": [
+        "transition"
+      ]
+    },
+    "turn_right": {
+      "frames": [
+        "turn_right/000.png",
+        "turn_right/001.png",
+        "turn_right/002.png",
+        "turn_right/003.png",
+        "turn_right/004.png"
+      ],
+      "fps": 8.0,
+      "loop": false,
+      "tags": [
+        "transition"
+      ]
+    },
+    "face_front_from_left": {
+      "frames": [
+        "face_front_from_left/000.png",
+        "face_front_from_left/001.png",
+        "face_front_from_left/002.png",
+        "face_front_from_left/003.png"
+      ],
+      "fps": 8.0,
+      "loop": false,
+      "tags": [
+        "transition"
+      ]
+    },
+    "face_front_from_right": {
+      "frames": [
+        "face_front_from_right/000.png",
+        "face_front_from_right/001.png",
+        "face_front_from_right/002.png",
+        "face_front_from_right/003.png",
+        "face_front_from_right/004.png"
+      ],
+      "fps": 8.0,
+      "loop": false,
+      "tags": [
+        "transition"
+      ]
+    },
+    "walk_left": {
+      "frames": [
+        "walk_left/000.png",
+        "walk_left/001.png",
+        "walk_left/002.png",
+        "walk_left/003.png",
+        "walk_left/004.png",
+        "walk_left/005.png",
+        "walk_left/006.png",
+        "walk_left/007.png"
+      ],
+      "fps": 9.0,
+      "loop": true,
+      "tags": [
+        "move",
+        "left"
+      ]
+    },
+    "walk_right": {
+      "frames": [
+        "walk_right/000.png",
+        "walk_right/001.png",
+        "walk_right/002.png",
+        "walk_right/003.png",
+        "walk_right/004.png",
+        "walk_right/005.png",
+        "walk_right/006.png",
+        "walk_right/007.png"
+      ],
+      "fps": 9.0,
+      "loop": true,
+      "tags": [
+        "move",
+        "right"
+      ]
+    },
+    "lie_down": {
+      "frames": [
+        "lie_down/000.png",
+        "lie_down/001.png",
+        "lie_down/002.png",
+        "lie_down/003.png"
+      ],
+      "fps": 4.0,
+      "loop": false,
+      "tags": [
+        "transition",
+        "side"
+      ]
+    },
+    "sleep": {
+      "frames": [
+        "sleep/000.png",
+        "sleep/001.png",
+        "sleep/002.png",
+        "sleep/003.png",
+        "sleep/004.png",
+        "sleep/005.png",
+        "sleep/006.png",
+        "sleep/007.png"
+      ],
+      "fps": 2.0,
+      "loop": true,
+      "tags": [
+        "idle",
+        "side"
+      ]
+    },
+    "wake_up": {
+      "frames": [
+        "wake_up/000.png",
+        "wake_up/001.png",
+        "wake_up/002.png",
+        "wake_up/003.png"
+      ],
+      "fps": 4.0,
+      "loop": false,
+      "tags": [
+        "transition",
+        "side"
+      ]
+    },
+    "groom": {
+      "frames": [
+        "groom/000.png",
+        "groom/001.png",
+        "groom/002.png",
+        "groom/003.png",
+        "groom/004.png",
+        "groom/005.png"
+      ],
+      "fps": 6.0,
+      "loop": false,
+      "tags": [
+        "action",
+        "front"
+      ]
+    },
+    "stretch": {
+      "frames": [
+        "stretch/000.png",
+        "stretch/001.png",
+        "stretch/002.png",
+        "stretch/003.png",
+        "stretch/004.png",
+        "stretch/005.png"
+      ],
+      "fps": 4.0,
+      "loop": false,
+      "tags": [
+        "action",
+        "side"
+      ]
+    },
+    "happy": {
+      "frames": [
+        "happy/000.png",
+        "happy/001.png",
+        "happy/002.png",
+        "happy/003.png",
+        "happy/004.png"
+      ],
+      "fps": 5.0,
+      "loop": false,
+      "tags": [
+        "reaction",
+        "front"
+      ]
+    },
+    "wave": {
+      "frames": [
+        "wave/000.png",
+        "wave/001.png",
+        "wave/002.png",
+        "wave/003.png",
+        "wave/004.png",
+        "wave/005.png"
+      ],
+      "fps": 7.0,
+      "loop": false,
+      "tags": [
+        "action",
+        "front"
+      ]
+    },
+    "held": {
+      "frames": [
+        "held/000.png"
+      ],
+      "fps": 1.0,
+      "loop": true,
+      "tags": [
+        "held",
+        "front"
+      ]
+    },
+    "startle": {
+      "frames": [
+        "startle/000.png",
+        "startle/001.png",
+        "startle/002.png",
+        "startle/003.png",
+        "startle/004.png",
+        "startle/005.png",
+        "startle/006.png",
+        "startle/007.png",
+        "startle/008.png",
+        "startle/009.png"
+      ],
+      "fps": 11.0,
+      "loop": false,
+      "tags": [
+        "reaction",
+        "side"
+      ]
+    }
+  },
+  "sitHeight": 184
+}
