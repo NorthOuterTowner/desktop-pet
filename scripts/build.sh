@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 #
-# Builds the desktop-cat installers on macOS and Linux.
+# Builds the desktop-cat installers on macOS.
 #
 # A thin wrapper so the build can be run straight from a shell without going through
-# npm. Every argument is passed through untouched.
+# npm. Every argument is passed through untouched. (Linux is not a packaging target
+# any more, so on Linux this only has --help to offer.)
 #
 #   ./scripts/build.sh
-#   ./scripts/build.sh --linux --arch x64
+#   ./scripts/build.sh --mac --arch arm64
 #   ./scripts/build.sh --help
 
 set -euo pipefail

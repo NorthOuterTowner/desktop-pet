@@ -163,16 +163,17 @@ folder of files to copy about.
 | --- | --- | --- |
 | Windows | `desktop-cat-<v>-win-x64-setup.exe` | NSIS wizard: choose per-user or per-machine, choose the location, get Start menu and desktop shortcuts and an entry in Apps & features that uninstalls cleanly |
 | macOS | `desktop-cat-<v>-mac-arm64.dmg` | Disk image you drag to Applications. Runs as a menu-bar accessory with no Dock tile |
-| Debian/Ubuntu | `desktop-cat-<v>-linux-amd64.deb` | Installs under `/opt`, registers a desktop entry and the themed icons |
-| Fedora/RHEL | `desktop-cat-<v>-linux-x86_64.rpm` | Same, through rpm |
-| Any Linux | `desktop-cat-<v>-linux-x86_64.AppImage` | The portable option: one executable, nothing installed |
 
-Windows and macOS are built for both x64 and arm64, so there is an Apple-silicon and
-an Intel `.dmg`. Everything lands in `dist/` next to a `SHA256SUMS-<platform>.txt`.
+Both are built for x64 and arm64, so there is an Apple-silicon and an Intel `.dmg`.
+Everything lands in `dist/` next to a `SHA256SUMS-<platform>.txt`.
+
+Linux is not packaged. The `.deb`, `.rpm` and `.AppImage` targets were the slowest
+third of every release for the fewest downloads, so they were removed; `npm start`
+still runs the cat from source on Linux.
 
 ```powershell
 npm run dist                               # installers for this machine
-npm run dist:win                           # or dist:mac / dist:linux
+npm run dist:win                           # or dist:mac
 npm run pack                               # unpacked app only, for debugging
 node scripts/build-installers.mjs --help
 ```
@@ -183,26 +184,25 @@ arguments: `.\scripts\build.ps1` on Windows, `bash scripts/build.sh` elsewhere.
 ### One installer per operating system
 
 `npm run dist:all` refuses on most machines, and that is the honest answer rather than
-a gap to work around. A `.dmg` is assembled by `hdiutil`, and `dpkg-deb`, `rpmbuild`
-and `appimagetool` do not run on Windows at all. The script checks the host before it
-starts and names the combinations that cannot work, so you find out in a second
-instead of four minutes into a build. `--allow-cross` overrides it if you have Wine or
-a container set up.
+a gap to work around: a `.dmg` is assembled by `hdiutil`, which only exists on macOS.
+The script checks the host before it starts and names the combinations that cannot
+work, so you find out in a second instead of four minutes into a build.
+`--allow-cross` overrides it if you have Wine or a container set up.
 
-Getting all three in one go is what CI is for.
+Getting both in one go is what CI is for.
 
 ### Releasing
 
-`.github/workflows/release.yml` runs the same script on `windows-latest`,
-`macos-latest` and `ubuntu-latest`, then gathers the installers into a single GitHub
-release. Cutting one takes a push and nothing else:
+`.github/workflows/release.yml` runs the same script on `windows-latest` and
+`macos-latest`, then gathers the installers into a single GitHub release. Cutting one
+takes a push and nothing else:
 
 ```powershell
 npm version patch     # minor / major too; writes package.json and commits
 git push
 ```
 
-On a push to `main` the workflow builds all three platforms and then looks for a
+On a push to `main` the workflow builds both platforms and then looks for a
 release tagged `v<version in package.json>`. No such release means this push is a new
 version, so it creates it and attaches every installer plus a combined
 `SHA256SUMS.txt`. If the release already exists it leaves it alone -- the version bump
@@ -210,8 +210,8 @@ is what marks a push as a release, so ordinary pushes don't pile up duplicates.
 
 Pushing a `v*` tag releases under that exact tag instead, and re-running a tag build
 replaces its assets rather than failing on the release already being there. Pull
-requests build all three platforms and publish nothing. A manual run from the Actions
-tab behaves like a push to `main` and has a switch to skip publishing.
+requests build both platforms and publish nothing. A manual run from the Actions tab
+behaves like a push to `main` and has a switch to skip publishing.
 
 The built-in `GITHUB_TOKEN` is the only credential involved; there are no secrets to
 set up.

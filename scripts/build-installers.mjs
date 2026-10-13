@@ -7,8 +7,10 @@
  *   node scripts/build-installers.mjs            # installers for this machine
  *   node scripts/build-installers.mjs --win      # Windows NSIS setup .exe
  *   node scripts/build-installers.mjs --mac      # macOS .dmg
- *   node scripts/build-installers.mjs --linux    # .deb, .rpm and .AppImage
- *   node scripts/build-installers.mjs --all      # all three (needs CI, see below)
+ *   node scripts/build-installers.mjs --all      # both (needs CI, see below)
+ *
+ * Linux packaging was dropped: the deb/rpm/AppImage targets took the longest to build
+ * for the fewest users. Running the app from source on Linux still works.
  *
  * The targets themselves live in electron-builder.yml. This script's job is the part
  * a config file cannot do: refuse the combinations that cannot work on the current
@@ -27,16 +29,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = path.join(ROOT, 'dist');
 
 /** What counts as an installer, as opposed to a build by-product. */
-const INSTALLER_EXTENSIONS = new Set([
-  '.exe',
-  '.msi',
-  '.dmg',
-  '.pkg',
-  '.appimage',
-  '.deb',
-  '.rpm',
-  '.snap',
-]);
+const INSTALLER_EXTENSIONS = new Set(['.exe', '.msi', '.dmg', '.pkg']);
 
 /**
  * Files that must exist before packaging starts. Both are generated and both fail
@@ -56,8 +49,7 @@ Usage: node scripts/build-installers.mjs [options]
 Platforms (default: whichever this machine is)
   --win                 Windows installer (NSIS setup .exe, x64 + arm64)
   --mac                 macOS disk image (.dmg, Intel + Apple silicon)
-  --linux               Linux packages (.deb, .rpm, .AppImage)
-  --all                 All of the above
+  --all                 Both of the above
 
 Options
   --arch <a>            Override the architectures: x64, arm64, armv7l, universal.
@@ -69,9 +61,9 @@ Options
   -h, --help            This text.
 
 Cross-building, in short: an installer generally has to be built on its own operating
-system. A .dmg needs macOS, and the Linux packagers do not run on Windows. That is
-what the GitHub Actions workflow is for -- it runs this same script once per runner
-and collects the results. See the Packaging section of README.md.
+system -- a .dmg needs macOS. That is what the GitHub Actions workflow is for: it runs
+this same script once per runner and collects the results. See the Packaging section
+of README.md.
 `;
 
 function fail(message, hint) {
@@ -104,11 +96,8 @@ function parseArgs(argv) {
       case '--osx':
         options.platforms.add('mac');
         break;
-      case '--linux':
-        options.platforms.add('linux');
-        break;
       case '--all':
-        options.platforms.add('win').add('mac').add('linux');
+        options.platforms.add('win').add('mac');
         break;
       case '--dir':
         options.dirOnly = true;
@@ -143,8 +132,16 @@ function parseArgs(argv) {
   }
 
   if (options.platforms.size === 0) {
-    const host = { win32: 'win', darwin: 'mac', linux: 'linux' }[process.platform];
-    if (!host) fail(`unsupported host platform ${process.platform}`);
+    const host = { win32: 'win', darwin: 'mac' }[process.platform];
+    if (!host) {
+      fail(
+        `nothing to build on ${process.platform}`,
+        process.platform === 'linux'
+          ? 'Linux packaging was removed. Run the app from source with `npm start`, ' +
+              'or pass --win / --mac on a host that can build them.'
+          : 'pass --win or --mac',
+      );
+    }
     options.platforms.add(host);
   }
 
@@ -166,12 +163,6 @@ function checkHostSupport({ platforms, allowCross }) {
         "hdiutil, and code signing needs Apple's tooling.",
     );
   }
-  if (platforms.has('linux') && host === 'win32') {
-    problems.push(
-      'The Linux packagers (dpkg-deb, rpmbuild, appimagetool) do not run on ' +
-        'Windows. Build from WSL, a Linux box, or CI.',
-    );
-  }
   if (platforms.has('win') && host !== 'win32') {
     warnings.push(
       'Building the Windows installer off Windows needs Wine on PATH, and the ' +
@@ -190,7 +181,7 @@ function checkHostSupport({ platforms, allowCross }) {
     `cannot build these installers on ${host}:\n       - ${problems.join(
       '\n       - ',
     )}`,
-    'Push a tag and let .github/workflows/release.yml build all three, or pass ' +
+    'Push a tag and let .github/workflows/release.yml build both, or pass ' +
       '--allow-cross to try anyway.',
   );
 }
@@ -256,12 +247,12 @@ async function describe(artifacts) {
 }
 
 /**
- * A checksum file per platform, not one shared file: the three CI jobs run on
- * separate machines and their outputs are only ever brought together afterwards, so a
- * single name would just overwrite itself.
+ * A checksum file per platform, not one shared file: the CI jobs run on separate
+ * machines and their outputs are only ever brought together afterwards, so a single
+ * name would just overwrite itself.
  */
 async function writeManifest(version, files) {
-  const suffix = { win32: 'windows', darwin: 'macos', linux: 'linux' }[process.platform];
+  const suffix = { win32: 'windows', darwin: 'macos' }[process.platform];
 
   const manifest = path.join(DIST, `installers-${suffix}.json`);
   await fs.writeFile(
@@ -317,7 +308,7 @@ async function main() {
     return arch;
   });
 
-  const platformKeys = { win: Platform.WINDOWS, mac: Platform.MAC, linux: Platform.LINUX };
+  const platformKeys = { win: Platform.WINDOWS, mac: Platform.MAC };
   // An empty arch map means "whatever electron-builder.yml says", which is the case
   // we want by default. Only an explicit --arch narrows it.
   const targets = new Map();

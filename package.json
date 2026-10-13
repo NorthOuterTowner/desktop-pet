@@ -1,7 +1,7 @@
 {
   "name": "desktop-cat",
   "productName": "Desktop Cat",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "A desktop cat that sits on your taskbar, wanders about and naps",
   "homepage": "https://github.com/NorthOuterTowner/desktop-pet",
   "repository": {
@@ -26,7 +26,6 @@
     "dist": "node scripts/build-installers.mjs",
     "dist:win": "node scripts/build-installers.mjs --win",
     "dist:mac": "node scripts/build-installers.mjs --mac",
-    "dist:linux": "node scripts/build-installers.mjs --linux",
     "dist:all": "node scripts/build-installers.mjs --all",
     "pack": "node scripts/build-installers.mjs --dir"
   },

@@ -6,6 +6,11 @@ node_modules/
 dist/
 out/
 
+# rust / tauri build output. Gigabytes of compiled crates, and `gen/` is generated
+# from tauri.conf.json on every build.
+target/
+spike/**/src-tauri/gen/
+
 # python
 __pycache__/
 *.py[cod]
