@@ -1,0 +1,38 @@
+/* The window is transparent and click-through, so nothing here may paint a
+   background: a single opaque pixel would both show up as a grey sheet over the
+   desktop and swallow clicks once the window takes the mouse. */
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  /* The cat is not text. Stops a drag from selecting the HUD. */
+  user-select: none;
+  cursor: default;
+}
+
+#cat {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+}
+
+/* Deliberately in the top-left corner, far from the cat, so the self-test's
+   "cursor away" probe lands on the HUD and proves that even a painted element is
+   click-through while the window is ignoring the cursor. */
+#hud {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  margin: 0;
+  padding: 8px 10px;
+  font: 12px/1.45 Consolas, ui-monospace, monospace;
+  color: #d7f7ff;
+  background: rgba(8, 16, 24, 0.72);
+  border: 1px solid rgba(120, 200, 255, 0.35);
+  border-radius: 6px;
+  white-space: pre;
+}
