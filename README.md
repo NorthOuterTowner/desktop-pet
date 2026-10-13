@@ -23,12 +23,42 @@ or by right-clicking the cat.
 | Double-click the cat | A pleased wiggle |
 | Drag the cat | Pick it up and carry it anywhere; it falls back to the floor when you let go |
 | Right-click the cat | The menu below |
+| Drag a file onto the cat | It opens its mouth. Drop it and the cat offers to eat the file -- see below |
 | Click the tray icon | Head tilt |
 | Right-click the tray icon | The same menu |
 
-The menu is: Come here, Go for a walk, Head tilt, Wave, Groom, Nap, Wake up, Pause,
-Quit. "Come here" walks the cat over to wherever your mouse is. "Pause" freezes it
-completely, down to the frame it is showing.
+The menu is: Come here, Go for a walk, Give a fish, Head tilt, Wave, Groom, Nap, Wake
+up, Pause, Quit. "Come here" walks the cat over to wherever your mouse is. "Give a
+fish" drops a dried fish out of the sky next to the cat -- not under the cursor, which
+is over by the tray when you click it -- close enough that the cat walks a step or two
+at most. It then eats it in three bites, and the fish on the floor goes whole, bitten,
+crumbs, gone as it does. "Pause" freezes everything, down to the frame it is showing.
+
+The cat's own right-click menu borrows focus for as long as it is open. The window is
+`focusable: false` everywhere else, but a popup menu whose owner cannot take focus is
+one Windows will not dismiss when you click away from it -- it used to sit there until
+something was clicked on the cat itself.
+
+### Feeding it your files
+
+Dragging one of your own files onto the cat is the same gesture, with real
+consequences: the cat eats the file, and eating means `unlink`. No Recycle Bin, no
+undo. So the file path is deliberately the slow one:
+
+- Hovering a file over the cat only opens its mouth. Nothing is touched, and letting
+  go anywhere else, or just waiting 25 seconds, closes it again. No fish appears: the
+  cat is about to eat *your file*, and drawing a treat for it would say otherwise.
+- Dropping asks first, with the file name, its size and what is about to happen.
+  **Cancel** is both the default button and what Escape does.
+- The third button, *feed it and stop asking for 5 minutes*, exists for clearing out
+  a pile of junk. It is five minutes, it is per-run, and it is never written to disk:
+  every launch starts by asking again.
+- Some things are refused outright, before any dialog: folders, drive roots, your home
+  folder, anything inside a system folder, and anything belonging to Desktop Cat
+  itself. The cat eats one file at a time, not your projects.
+
+The renderer never touches the filesystem. It reports the dropped paths and nothing
+else; every decision and the deletion itself happen in the main process.
 
 The cat is always drawn at the same size. There is deliberately no size setting; to
 change it, move `TARGET_SIT_HEIGHT` in `src/renderer.js`.
@@ -82,6 +112,20 @@ screen), then startles on landing and settles back into a sit. Falling is checke
 before the pause flag, so a cat dropped while paused still lands instead of hanging
 in the air.
 
+Food is the one other thing that interrupts the loop. An offer makes the cat walk
+over to it, open its mouth and wait: a fish from the menu goes down on arrival, a
+dragged file waits for your answer to the confirmation. Either way the meal is chew,
+swallow, then a pleased wiggle. The waiting is on a 25-second fuse, because every way
+a drag can end somewhere the window never hears about has to end with the cat closing
+its mouth rather than gaping at the desktop forever.
+
+`brain.offer` is the single source of truth for food: `{ x, auto, bites }`, created
+when something is offered and cleared when it is swallowed or given up on. The view
+draws the treat from it and nothing else, which is what makes the fish impossible to
+leave on the floor after the meal or on a cat that was picked up mid-bite. The offer
+deliberately outlives the first chew -- that is what keeps the fish on the floor,
+shrinking a stage per bite, while the cat works through it.
+
 ## Layout
 
 ```
@@ -89,15 +133,16 @@ electron/main.js                window, tray and cat menu, app:// protocol, watc
 electron/preload.js             the `pet` bridge exposed to the renderer
 electron/_smoke.js              `--smoke` diagnostic: boots, probes, screenshots, quits
 src/index.html                  the stage
-src/styles.css                  heart float-up animation, drag cursor states
+src/styles.css                  heart float-up animation, treat, drag cursor states
 src/renderer.js                 canvas drawing, cross-fade, per-pixel hit test, dragging
 src/behavior.js                 the brain: a step queue, an energy model and gravity
 src/sprites.js                  manifest loading and frame lookup
 tools/build_assets.py           sheet -> sprite pipeline
 tools/build_icons.py            sprite -> the app icons the installers ship
+tools/build_treat.py            the raw fish drawing -> the treat sprite
 tools/_simulate.mjs             steps the brain headless and checks it
 assets/sprites/                 generated frames + manifest.json
-icons/                          the heart the renderer floats on a click
+icons/                          the heart floated on a click, the fish the cat is fed
 rsrc/raw/                       source sheets
 rsrc/_check/                    QA output
 electron-builder.yml            installer targets, one block per platform
@@ -105,7 +150,7 @@ scripts/build-installers.mjs    the packaging entry point
 scripts/build.ps1               the same from a PowerShell prompt
 scripts/build.sh                the same from a shell
 build/                          generated app icons + macOS entitlements
-.github/workflows/release.yml   builds on three runners, publishes the release
+.github/workflows/release.yml   builds on two runners, publishes the release
 ```
 
 ### Why a custom `app://` scheme instead of `file://`
@@ -141,6 +186,14 @@ inside the screen), dropping it from a height and from floor level, "come here"
 arriving on the exact spot, and pause freezing everything without trapping a dropped
 cat in mid-air. It exits non-zero if any check fails.
 
+Feeding gets its own section there, because the failure modes are all about state
+that outlives the meal: that a fish makes the cat walk over, open its mouth, chew and
+swallow *in that order*; that a hovering file holds the mouth open without the brain
+advancing on its own; that forty dragover ticks in a row do not restart the approach;
+that cancelling, or nobody ever answering, both close the mouth again; that being
+picked up mid-offer forgets the food; and that nothing leaves the cat stuck in a
+feeding pose afterwards.
+
 `check:app` boots the real app and drives a click through synthetic input events, so
 the per-pixel hit test and the mousedown path are genuinely exercised rather than
 bypassed by calling the brain directly. It also checks that transparent corners of the
@@ -149,9 +202,17 @@ opacity, that a dropped cat falls monotonically to the floor and startles, and t
 the main process is not holding the mouse once the cursor is away from the cat.
 Screenshots land in `rsrc/_check/electron/`.
 
-Two things the automated checks cannot cover: the right-click menu is a native popup,
-and real click-through has to be felt rather than measured. Both need confirming by
-hand. Note also that launching two instances back to back can collide on the Chromium
+`check:app` also covers the feeding chain in a real window, including that the treat
+sprite appears with the offer and is gone the frame the food is in the mouth, and it
+checks the rules about what the cat may eat directly -- those rules are the only thing
+between a dropped file and an unrecoverable delete, so they are worth asserting rather
+than reading.
+
+Three things the automated checks cannot cover: the right-click menu is a native
+popup, real click-through has to be felt rather than measured, and starting a file
+drag is an OS-level operation that `sendInputEvent` cannot begin -- so dragging a real
+file onto the cat needs trying by hand. All three need confirming by hand. Note also
+that launching two instances back to back can collide on the Chromium
 cache directory; the second will exit immediately, so leave a moment between runs.
 
 ## Installers
@@ -259,12 +320,22 @@ The pipeline is Python and needs Pillow, numpy and scipy:
 pip install -r requirements.txt
 npm run assets          # build assets/sprites
 npm run assets:probe    # numbered contact sheets only, to identify frames
+npm run treat           # the fish sprite, from the raw drawing
 ```
 
-Nine source sheets are cut into 21 action folders (112 frames) plus a
+Eleven source sheets are cut into 26 action folders (134 frames) plus a
 `manifest.json`. All frames land on a shared 256px canvas, bottom-aligned on one
 ground line, so a clip change never needs per-frame offsets and the cat never hops
 vertically when one animation hands over to the next.
+
+`npm run treat` is separate because the fish is not a cat. The raw drawing holds four
+treats side by side -- two whole fish, one bitten, a pile of crumbs -- and three of
+those are the stages of one fish being eaten, so the tool cuts them out and writes
+`icons/fish.png`, `fish_bitten.png` and `fish_crumbs.png` *on a common canvas at a
+common scale*, bottom-aligned and centred. That is the part that matters: it is what
+lets the renderer swap the image between bites and have the fish shrink in place
+rather than jump about and change size. Treats are found by dilating the alpha before
+labelling, so the pile of crumbs groups as one treat instead of a dozen specks.
 
 ### Keeping the cat one size
 
@@ -324,9 +395,19 @@ Turning: `turn_left`, `turn_right`, `face_front_from_left`, `face_front_from_rig
 Moving: `walk_left`, `walk_right`.
 Sleeping: `lie_down`, `sleep`, `wake_up`, `stretch`.
 Being handled: `held`, `startle`.
+Being fed: `feed_open`, `feed_wait`, `feed_close`, `chew`, `swallow`.
 
-`held` and `startle` are reachable only by picking the cat up, and `head_tilt` only by
-clicking it; the headless check asserts they never fire on their own.
+`held` and `startle` are reachable only by picking the cat up, `head_tilt` only by
+clicking it, and the feeding clips only by offering it food; the headless check
+asserts none of them fire on their own -- a cat that chews unprompted has found food
+nobody gave it.
+
+The two feeding sheets are one family and both open on a plain front sit, which is
+what ties them to the rest of the cat: frame 0 is the pose the family scale is
+measured against *and* the frame the clips hand back to, so `feed_open` starts from
+the resting sit and `swallow` ends on it. `feed_wait` is the only one that loops,
+because it has to hold for as long as a file is hovering, so it alternates a wide
+mouth with a narrower one and an occasional lick instead of freezing on one gape.
 
 The source walk cycle faces left, so `walk_right` is mirrored. The turn sheet is one
 continuous sweep from right profile through front to left profile, so a right turn is
@@ -341,5 +422,6 @@ it are lower than the cat ever rests, and ending there made it sink below the si
 pop back up on every single sit-down.
 
 Still unused in the raw art: a run cycle, a rough jump row, the side-sit tail variants
-and the old startle row in `rsrc/raw/new2/Designer (3).png`, and the original turn
-sweep in `rsrc/raw/enw/Designer.png`.
+and the old startle row in `rsrc/raw/new2/Designer (3).png`, the original turn sweep
+in `rsrc/raw/enw/Designer.png`, and the bitten fish and crumbs on
+`rsrc/raw/new-10.13/fish_source.png`.

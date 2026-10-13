@@ -289,6 +289,78 @@
         "front"
       ]
     },
+    "feed_open": {
+      "frames": [
+        "feed_open/000.png",
+        "feed_open/001.png",
+        "feed_open/002.png",
+        "feed_open/003.png"
+      ],
+      "fps": 8.0,
+      "loop": false,
+      "tags": [
+        "transition",
+        "front"
+      ]
+    },
+    "feed_wait": {
+      "frames": [
+        "feed_wait/000.png",
+        "feed_wait/001.png",
+        "feed_wait/002.png",
+        "feed_wait/003.png"
+      ],
+      "fps": 3.0,
+      "loop": true,
+      "tags": [
+        "idle",
+        "front"
+      ]
+    },
+    "feed_close": {
+      "frames": [
+        "feed_close/000.png",
+        "feed_close/001.png",
+        "feed_close/002.png"
+      ],
+      "fps": 7.0,
+      "loop": false,
+      "tags": [
+        "transition",
+        "front"
+      ]
+    },
+    "chew": {
+      "frames": [
+        "chew/000.png",
+        "chew/001.png",
+        "chew/002.png",
+        "chew/003.png",
+        "chew/004.png",
+        "chew/005.png"
+      ],
+      "fps": 7.0,
+      "loop": true,
+      "tags": [
+        "action",
+        "front"
+      ]
+    },
+    "swallow": {
+      "frames": [
+        "swallow/000.png",
+        "swallow/001.png",
+        "swallow/002.png",
+        "swallow/003.png",
+        "swallow/004.png"
+      ],
+      "fps": 4.0,
+      "loop": false,
+      "tags": [
+        "reaction",
+        "front"
+      ]
+    },
     "held": {
       "frames": [
         "held/000.png"

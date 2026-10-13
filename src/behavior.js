@@ -36,6 +36,28 @@ const MAX_FALL_SPEED = 2600;
 // Below this the cat is close enough to the floor to just be standing on it.
 const FLOOR_EPSILON = 0.5;
 
+// ---- being fed ----------------------------------------------------------------------
+
+// How long the cat holds its mouth open for food that never arrives. Every way an
+// offer can be left dangling -- a drag that ended outside the window, a confirmation
+// dialog left open, a dragleave that never fired -- has to end with the cat giving up
+// rather than sitting there gaping forever.
+const OFFER_PATIENCE = 25;
+// A treat that drifts further than this while the cat is already waiting is worth
+// getting up and walking to again. Anything closer and the cat just keeps waiting,
+// so a cursor jiggling over the cat does not restart the whole approach.
+const OFFER_CHASE = 140;
+// Close enough to food to eat it without bothering to walk.
+const OFFER_REACH = 24;
+// How far from the cat a fish from the menu lands. Sometimes inside OFFER_REACH, so
+// the cat just leans over and eats; sometimes a step or two away.
+const FISH_SPREAD = 70;
+// Bites it takes to finish a fish. The view has one treat image per bite, so this is
+// also how many times the fish visibly shrinks before it is gone.
+const FISH_BITES = 3;
+// The poses where the cat is waiting to be fed and an offer can still be cancelled.
+const OPEN_MOUTHED = new Set(['feed_open', 'feed_wait']);
+
 // Actions that leave the cat up on its feet; it has to sit back down before any of
 // the front-facing sitting animations will read correctly.
 const STANDING = new Set([
@@ -77,6 +99,10 @@ export class Brain {
     // Set while walking to a specific spot ("come here"), so the walk ends on the
     // target instead of after a duration.
     this.goal = null;
+    // Food on offer, as `{ x, auto }`, from the moment it is offered until it is
+    // either in the cat's mouth or given up on. The view draws the treat from this,
+    // so there is one source of truth for whether there is anything out there.
+    this.offer = null;
 
     // Bumped on every action change so the view can trigger a cross-fade.
     this.seq = 0;
@@ -200,6 +226,9 @@ export class Brain {
     this.vy = 0;
     this.vx = 0;
     this.goal = null;
+    // Picked up mid-meal: whatever was on offer is forgotten, and the view stops
+    // drawing it.
+    this.offer = null;
     this.queue = [];
     this.energy = Math.min(1, this.energy + 0.05);
     this._begin({ action: HELD, hold: Infinity });
@@ -271,41 +300,95 @@ export class Brain {
     this.energy = Math.min(1, this.energy + 0.1);
     this.vx = 0;
     this.goal = null;
-
-    const dest = Math.min(Math.max(x, this.minX), this.maxX);
-    const distance = Math.abs(dest - this.x);
-    const wake = this.asleep ? [{ action: 'wake_up' }, { action: 'stretch' }] : [];
-    const standing = this.asleep ? true : STANDING.has(this.action);
-
-    // Already there: just look up, no shuffling about.
-    if (distance < 8) {
-      this._enqueue([
-        ...wake,
-        ...(standing ? [{ action: 'sit_down' }] : this._returnToSitSteps()),
-        { action: 'head_tilt' },
-        { action: SIT, hold: this._rand(4, 9) },
-      ]);
-      return;
-    }
-
-    const dir = dest < this.x ? 'left' : 'right';
     this._enqueue([
-      ...wake,
-      ...(standing ? [] : [{ action: 'stand_up' }]),
-      { action: `turn_${dir}` },
-      {
-        action: `walk_${dir}`,
-        // Generous cap: `goal` ends the step on arrival, this is only a backstop in
-        // case the cat is blocked from reaching it.
-        hold: distance / this.walkSpeed + 2,
-        vx: this._speed(dir),
-        goal: dest,
-      },
-      { action: `face_front_from_${dir}` },
-      { action: 'sit_down' },
+      ...this._approachSteps(x),
       { action: 'head_tilt' },
       { action: SIT, hold: this._rand(4, 9) },
     ]);
+  }
+
+  // ---- being fed -------------------------------------------------------------------
+
+  /**
+   * Something edible is being held out at window x: a treat from the menu, or a file
+   * being dragged over the cat.
+   *
+   * The cat goes over and waits with its mouth open. An `auto` treat is eaten on
+   * arrival; a dragged file waits for `eat()`, because the user still has a
+   * confirmation to answer and may yet say no.
+   */
+  offerFood(x, { auto = false } = {}) {
+    if (this.airborne) return;
+    const at = Math.min(Math.max(x, this.minX), this.maxX);
+
+    // Already waiting: a drag hovering over the cat fires this many times a second,
+    // and restarting the approach on each one would leave the cat twitching. Only
+    // food that has wandered a long way is worth getting up for again; anything
+    // closer just buys the offer more patience.
+    if (this.offer && this.action === 'feed_wait') {
+      this.offer.x = at;
+      if (Math.abs(at - this.x) < OFFER_CHASE) {
+        this.elapsed = 0;
+        return;
+      }
+    }
+
+    this.energy = Math.min(1, this.energy + 0.05);
+    this.vx = 0;
+    this.goal = null;
+    this.offer = { x: at, auto, bites: 0 };
+    this._enqueue([
+      ...this._approachSteps(at, { reach: OFFER_REACH }),
+      { action: 'feed_open' },
+      ...(auto
+        ? [
+            { action: 'feed_wait', hold: 0.5 },
+            ...this._eatSteps({ bites: FISH_BITES }),
+          ]
+        : [
+            { action: 'feed_wait', hold: OFFER_PATIENCE },
+            // Patience ran out. _begin clears the offer when this starts.
+            { action: 'feed_close' },
+            { action: SIT, hold: this._rand(4, 9) },
+          ]),
+    ]);
+  }
+
+  /** The food goes in: chew, swallow, be pleased about it. */
+  eat() {
+    if (this.airborne) return;
+    this.vx = 0;
+    this.goal = null;
+    this._enqueue([...this._returnToSitSteps(), ...this._eatSteps()]);
+  }
+
+  /** The food went away: the drag left the window, or the user said no. */
+  cancelOffer() {
+    this.offer = null;
+    if (this.airborne) return;
+    if (!OPEN_MOUTHED.has(this.action)) return;
+    this._enqueue([{ action: 'feed_close' }, { action: SIT, hold: this._rand(4, 9) }]);
+  }
+
+  /**
+   * Working through the food, a bite at a time.
+   *
+   * `bite` is the count the view keys the treat's picture off, so a fish visibly
+   * goes whole -> bitten -> crumbs -> gone as the cat chews. A dropped file takes one
+   * bite and has no picture: there is nothing to show it shrinking.
+   */
+  _eatSteps({ bites = 1 } = {}) {
+    const steps = [];
+    for (let bite = 1; bite <= bites; bite += 1) {
+      // chew loops, so it needs an explicit hold; everything after it plays once.
+      steps.push({ action: 'chew', hold: this._rand(0.8, 1.15), bite });
+    }
+    steps.push(
+      { action: 'swallow' },
+      { action: 'happy' },
+      { action: SIT, hold: this._rand(4, 9) }
+    );
+    return steps;
   }
 
   setPaused(paused) {
@@ -325,6 +408,28 @@ export class Brain {
         return;
       case 'resume':
         this.setPaused(false);
+        return;
+      // A fish from the menu. It lands near the cat rather than under the cursor --
+      // the cursor is over by the tray when the menu is used, and a fish thrown
+      // across the room is a chore rather than a treat. Close enough that the cat
+      // walks a step or two at most, sometimes not at all.
+      case 'feed':
+        this.offerFood(
+          data.x ?? this.x + this._rand(-FISH_SPREAD, FISH_SPREAD),
+          { auto: true }
+        );
+        return;
+      // A file being dragged over the cat, and then the user's answer to the
+      // confirmation. Separate commands because the file is only eaten once the
+      // main process says the deletion was agreed to.
+      case 'offer':
+        this.offerFood(data.x ?? this.x);
+        return;
+      case 'eat':
+        this.eat();
+        return;
+      case 'cancelFeed':
+        this.cancelOffer();
         return;
       default:
         break;
@@ -379,6 +484,46 @@ export class Brain {
   }
 
   // ---- sequences -------------------------------------------------------------------
+
+  /**
+   * Steps that take the cat from wherever it is to `dest`, facing front and sitting.
+   * Shared by "come here" and by going over to food.
+   *
+   * `reach` is how close counts as already being there: tight for "come here", where
+   * the point is to come to a spot, looser for food, where shuffling two inches
+   * sideways before eating looks silly.
+   */
+  _approachSteps(dest, { reach = 8 } = {}) {
+    const at = Math.min(Math.max(dest, this.minX), this.maxX);
+    const distance = Math.abs(at - this.x);
+    const wake = this.asleep ? [{ action: 'wake_up' }, { action: 'stretch' }] : [];
+    const standing = this.asleep ? true : STANDING.has(this.action);
+
+    // Already there: no shuffling about.
+    if (distance < reach) {
+      return [
+        ...wake,
+        ...(standing ? [{ action: 'sit_down' }] : this._returnToSitSteps()),
+      ];
+    }
+
+    const dir = at < this.x ? 'left' : 'right';
+    return [
+      ...wake,
+      ...(standing ? [] : [{ action: 'stand_up' }]),
+      { action: `turn_${dir}` },
+      {
+        action: `walk_${dir}`,
+        // Generous cap: `goal` ends the step on arrival, this is only a backstop in
+        // case the cat is blocked from reaching it.
+        hold: distance / this.walkSpeed + 2,
+        vx: this._speed(dir),
+        goal: at,
+      },
+      { action: `face_front_from_${dir}` },
+      { action: 'sit_down' },
+    ];
+  }
 
   /** Steps needed to get from whatever is playing now back to a front-facing sit. */
   _returnToSitSteps() {
@@ -453,6 +598,13 @@ export class Brain {
 
   _begin(step) {
     const clip = this.clips[step.action];
+    // Each chew takes a bite out of what is on the floor, which is what the view
+    // draws from.
+    if (step.bite != null && this.offer) this.offer.bites = step.bite;
+    // The offer stops existing once it has gone down, or the cat has closed up and
+    // given up on it. Deliberately not at the first chew: a fish has to stay on the
+    // floor, getting smaller, for as long as the cat is working through it.
+    if (step.action === 'swallow' || step.action === 'feed_close') this.offer = null;
     this.action = step.action;
     this.elapsed = 0;
     this.vx = step.vx ?? 0;

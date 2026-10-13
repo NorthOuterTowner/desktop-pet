@@ -3,6 +3,14 @@ import { Brain } from './behavior.js';
 
 const SPRITE_BASE = '../assets/sprites/';
 const HEART_ICON = '../icons/icons8-heart-48.png';
+// The treat, one image per bite taken. All three are drawn on a common canvas at a
+// common scale by tools/build_treat.py, so swapping between them makes the fish
+// shrink in place instead of jumping about. Past the end of this list it is gone.
+const TREAT_STAGES = [
+  '../icons/fish.png',
+  '../icons/fish_bitten.png',
+  '../icons/fish_crumbs.png',
+];
 
 // Short cross-fade on every action change. The art comes from three separate
 // generator runs, so handing over between families can pop; 90ms of blend hides it
@@ -22,6 +30,13 @@ const TARGET_SIT_HEIGHT = 124;
 const WALK_SPEED = 51;
 // How far to the side of the cat's centre a heart pops, in screen pixels.
 const HEART_OFFSET = 48;
+// Treat *length* as a fraction of the cat's height -- the fish is long and thin, so
+// sizing it by height would make a dried fish longer than the cat is tall.
+const TREAT_SCALE = 0.45;
+// How far to the side of the cat's centre the treat lands, as a fraction of the
+// render box. Far enough out to clear the tail, which is the widest thing the cat
+// has and otherwise sits right on top of its dinner.
+const TREAT_OFFSET = 0.4;
 // How far the mouse has to move with the button down before a click becomes a drag.
 const DRAG_THRESHOLD = 4;
 // Proof of life for the main process while the cat holds the mouse.
@@ -35,6 +50,7 @@ const DRAG_IDLE_LIMIT_SECONDS = 5;
 const catEl = document.getElementById('cat');
 const ctx = catEl.getContext('2d');
 const heartsEl = document.getElementById('hearts');
+const treatEl = document.getElementById('treat');
 const errorEl = document.getElementById('error');
 
 let sprites = null;
@@ -55,6 +71,11 @@ let beatIn = 0;
 
 // Set on mousedown over the cat; becomes a drag once the mouse moves far enough.
 let press = null;
+
+// True between dropping a file and the main process coming back with the user's
+// answer. Some platforms fire a dragleave straight after a successful drop, and
+// acting on it would snap the cat's mouth shut while the confirmation is still up.
+let awaitingFeedAnswer = false;
 
 // ---- layout ---------------------------------------------------------------------------
 
@@ -178,6 +199,68 @@ function updateHit() {
   document.body.classList.toggle('carrying', brain.held);
 }
 
+// ---- the treat ------------------------------------------------------------------------
+
+/** Drawn size of the fish, keeping its own aspect. */
+function treatBox() {
+  const width = Math.round(TARGET_SIT_HEIGHT * TREAT_SCALE);
+  const ratio =
+    treatEl.naturalWidth && treatEl.naturalHeight
+      ? treatEl.naturalHeight / treatEl.naturalWidth
+      : 1;
+  return { width, height: Math.max(1, Math.round(width * ratio)) };
+}
+
+/** Left edge the treat is currently placed at, so the DOM is only written on change. */
+let treatLeft = null;
+
+/**
+ * Show the food wherever the brain says it is, or nothing at all.
+ *
+ * `brain.offer` is the single source of truth: it appears when a fish is offered, its
+ * `bites` count picks the stage, and it is cleared once the cat swallows or gives up
+ * -- so the treat cannot linger after the meal or outlive a cat picked up mid-bite.
+ *
+ * Only a fish is ever drawn. A dragged file deliberately has no sprite: putting a
+ * fish on the floor for it would tell the user the cat ate a fish, when what actually
+ * went down was their file.
+ */
+function placeTreat() {
+  const offer = brain.offer;
+  const bites = offer?.bites ?? 0;
+  const src = offer && offer.auto ? TREAT_STAGES[bites] : undefined;
+
+  if (!src) {
+    if (!treatEl.hidden) {
+      treatEl.hidden = true;
+      treatLeft = null;
+    }
+    return;
+  }
+
+  const { width, height } = treatBox();
+  const centre = offer.x + stage.catSize / 2;
+  // Beside the cat rather than behind it, flipped inwards when the cat is far enough
+  // right that the fish would hang off the screen.
+  const side = centre + stage.catSize * TREAT_OFFSET + width / 2 > stage.width ? -1 : 1;
+  const left = Math.round(centre + side * stage.catSize * TREAT_OFFSET - width / 2);
+
+  if (treatEl.hidden) {
+    treatEl.width = width;
+    treatEl.height = height;
+    // How far up the fall starts, set per drop so the fish always comes in off the
+    // top of the screen rather than from a fixed distance above the floor. Showing
+    // the element is what starts the animation, so this has to be set first.
+    treatEl.style.setProperty('--drop', `${-(window.innerHeight - height)}px`);
+    treatEl.hidden = false;
+  }
+  if (treatEl.getAttribute('src') !== src) treatEl.setAttribute('src', src);
+  if (left !== treatLeft) {
+    treatLeft = left;
+    treatEl.style.left = `${left}px`;
+  }
+}
+
 function spawnHeart() {
   const size = stage.catSize;
   const heart = document.createElement('img');
@@ -277,12 +360,71 @@ function wireEvents() {
     if (overCatAt(event.clientX, event.clientY)) window.pet.openMenu();
   });
 
+  // ---- being fed a file ----------------------------------------------------------
+  //
+  // These only ever fire while the window holds the mouse, which the main process
+  // only grants while the cursor is on the cat's own pixels -- so a drag that gets
+  // this far is a drag over the cat, and no extra hit test is needed.
+  //
+  // preventDefault on dragover is what makes the window a drop target at all; the
+  // one on drop is what stops Chromium from navigating this window to the dropped
+  // file, which would replace the pet with a picture of it.
+  document.addEventListener('dragover', (event) => {
+    event.preventDefault();
+    if (!hasFiles(event.dataTransfer)) return;
+    event.dataTransfer.dropEffect = 'move';
+    // Offer it where the cursor is, converted to where the cat should stand.
+    brain.offerFood(event.clientX - stage.catSize / 2);
+  });
+
+  document.addEventListener('dragleave', (event) => {
+    // dragleave also fires when crossing between child elements; a null
+    // relatedTarget is the one that means the pointer really left the window.
+    if (event.relatedTarget === null && !awaitingFeedAnswer) brain.cancelOffer();
+  });
+
+  document.addEventListener('dragend', () => {
+    if (!awaitingFeedAnswer) brain.cancelOffer();
+  });
+
+  document.addEventListener('drop', (event) => {
+    event.preventDefault();
+    const files = [...(event.dataTransfer?.files ?? [])];
+    // File.path was removed from Electron, so the real path comes from the preload's
+    // webUtils bridge instead.
+    const paths = files.map((file) => window.pet.pathForFile(file)).filter(Boolean);
+    if (paths.length === 0) {
+      brain.cancelOffer();
+      return;
+    }
+    // The cat keeps its mouth open while the user answers the confirmation. The main
+    // process replies with 'eat' or 'cancelFeed'.
+    awaitingFeedAnswer = true;
+    window.pet.feedFiles(paths);
+  });
+
   window.pet.onCommand((payload) => {
     const { name, ...data } = payload ?? {};
+    if (name === 'eat' || name === 'cancelFeed') awaitingFeedAnswer = false;
     brain.command(name, data);
     if (name === 'tilt') spawnHeart();
+    // A finished meal is worth being pleased about, visibly.
+    if (name === 'eat') spawnHeart();
   });
   window.pet.onResized(applyStage);
+
+  // The forwarded mousemove stream stops dead during an OS file drag: the drag
+  // source has the mouse captured, so no other window hears about it. Without this
+  // the hit test would freeze at whatever it last saw, the window would stay
+  // click-through, and the drop would never reach us at all.
+  window.pet.onCursor((point) => {
+    lastMouse = point;
+  });
+}
+
+/** Is this drag carrying files, as opposed to text or a browser selection? */
+function hasFiles(transfer) {
+  return Boolean(transfer) && [...transfer.types].includes('Files');
 }
 
 // ---- boot -----------------------------------------------------------------------------
@@ -300,6 +442,12 @@ async function main() {
   hitCtx = hit.getContext('2d', { willReadFrequently: true });
 
   sprites = await loadSprites(SPRITE_BASE);
+  // Decode every stage of the treat up front. The swaps happen mid-chew, and a blank
+  // frame while the next one loads would read as the fish vanishing a bite early.
+  for (const src of TREAT_STAGES) {
+    const preload = new Image();
+    preload.src = src;
+  }
   const info = await window.pet.stage();
   applyStage(info);
 
@@ -317,7 +465,15 @@ async function main() {
   // poking at behaviour from devtools. `overCatAt` is the same lookup the frame loop
   // uses, exposed so the hit test can be checked without depending on where the real
   // cursor happens to be -- synthetic mouse events race with forwarded real ones.
-  window.__catDebug = { brain, spawnHeart, sprites, overCatAt, floorTop, catTop };
+  window.__catDebug = {
+    brain,
+    spawnHeart,
+    sprites,
+    overCatAt,
+    floorTop,
+    catTop,
+    treatEl,
+  };
 
   let last = performance.now();
   const tick = (now) => {
@@ -333,6 +489,7 @@ async function main() {
 
     brain.update(dt);
     draw(dt);
+    placeTreat();
     updateHit();
 
     if (interactive) {

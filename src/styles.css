@@ -49,6 +49,46 @@ body.carrying.over-cat {
   pointer-events: none;
 }
 
+/* The treat sits behind the cat so a mouthful reads as going *into* the mouth, and
+   never takes a click: dropping a file is a drag, and the window must not start
+   treating the fish as a drop target of its own. */
+#treat {
+  position: absolute;
+  bottom: 0;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.3));
+  animation: treat-drop 620ms linear;
+}
+
+/* Dropped in from off the top of the screen. `--drop` is set from JS to the height of
+   the window, so the fish arrives from above wherever the taskbar happens to be.
+   The fall is shaped by the keyframe stops rather than by an easing curve, because
+   the same curve would also apply to the bounce at the end and make it mushy. */
+@keyframes treat-drop {
+  0% {
+    transform: translateY(var(--drop, -600px)) rotate(-20deg);
+  }
+  25% {
+    transform: translateY(calc(var(--drop, -600px) * 0.78)) rotate(-13deg);
+  }
+  50% {
+    transform: translateY(calc(var(--drop, -600px) * 0.44)) rotate(-6deg);
+  }
+  70% {
+    transform: translateY(0) rotate(4deg);
+  }
+  /* Something that stops dead on the floor looks pinned to it. */
+  82% {
+    transform: translateY(-11px) rotate(-2deg);
+  }
+  92% {
+    transform: translateY(0) rotate(0deg);
+  }
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+}
+
 .heart {
   position: absolute;
   width: 26px;

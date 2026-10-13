@@ -1,6 +1,6 @@
 'use strict';
 
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('pet', {
   /**
@@ -33,4 +33,32 @@ contextBridge.exposeInMainWorld('pet', {
 
   /** Screen layout changed; { width, height }. */
   onResized: (handler) => ipcRenderer.on('stage:resized', (_e, info) => handler(info)),
+
+  /**
+   * The real filesystem path behind a dropped File.
+   *
+   * `File.path` was removed from Electron and the renderer has no Node access, so
+   * this is the only way for a drop to name an actual file. It hands back a string
+   * and nothing else: no handle, no read, no write.
+   */
+  pathForFile: (file) => {
+    try {
+      return webUtils.getPathForFile(file);
+    } catch {
+      return null;
+    }
+  },
+
+  /**
+   * Dropped files, for the cat to eat. The main process is the only thing that may
+   * act on them, and it asks the user first -- eating a file deletes it for good.
+   */
+  feedFiles: (paths) => ipcRenderer.send('pet:feed-files', paths),
+
+  /**
+   * Polled cursor position in window pixels. The forwarded mousemove stream goes
+   * silent for the length of an OS file drag, so this is what keeps the hit test
+   * (and therefore the window's ability to be a drop target) alive.
+   */
+  onCursor: (handler) => ipcRenderer.on('pet:cursor', (_e, point) => handler(point)),
 });

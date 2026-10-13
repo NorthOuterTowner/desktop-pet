@@ -123,9 +123,17 @@ check(
   !('held' in time) && !('startle' in time),
   'held/startle played without the cat being picked up'
 );
+
+// Actions that only exist as a response to something the user did: picking the cat
+// up, or feeding it. None of them may turn up in an unattended run -- a cat that
+// chews on its own has found food nobody gave it.
+const FEEDING = ['feed_open', 'feed_wait', 'feed_close', 'chew', 'swallow'];
+const PROMPTED_ONLY = new Set(['held', 'startle', 'head_tilt', ...FEEDING]);
+const fedItself = FEEDING.filter((name) => name in time);
+check(fedItself.length === 0, `the cat fed itself unattended: ${fedItself.join(', ')}`);
 check(
-  unused.every((name) => name === 'held' || name === 'startle' || name === 'head_tilt'),
-  `unreachable actions in the build: ${unused.join(', ')}`
+  unused.every((name) => PROMPTED_ONLY.has(name)),
+  `unreachable actions in the build: ${unused.filter((n) => !PROMPTED_ONLY.has(n)).join(', ')}`
 );
 
 // Check the sequences the requirements call for actually occur in order.
@@ -295,6 +303,112 @@ brain.command('resume');
 const resumed = settle(4);
 check(resumed.length > 1, 'resume did not get the cat moving again');
 console.log(`resumed -> ${resumed.slice(0, 5).join(' -> ')}`);
+
+// ---- feeding --------------------------------------------------------------------------
+//
+// Two paths, and they differ in one way that matters: a fish from the menu is eaten
+// on arrival, while a dragged file has to wait with the cat's mouth open for as long
+// as it takes the user to answer the confirmation -- and must give up eventually if
+// nobody ever does.
+
+console.log('\n--- feeding ---');
+settle(6);
+
+// A fish from the menu, dropped well away from the cat.
+const TREAT_AT = 300;
+brain.command('come', { x: 900 });
+settle(14);
+brain.command('feed', { x: TREAT_AT });
+check(brain.offer !== null, "'feed' did not create an offer");
+const meal = settle(26);
+console.log(`  fish at ${TREAT_AT}: ${meal.join(' -> ')}`);
+check(meal.includes('feed_open'), `the cat never opened its mouth: ${meal.join(' -> ')}`);
+check(meal.includes('chew'), `the cat never chewed: ${meal.join(' -> ')}`);
+check(meal.includes('swallow'), `the cat never swallowed: ${meal.join(' -> ')}`);
+check(
+  meal.indexOf('feed_open') < meal.indexOf('chew') &&
+    meal.indexOf('chew') < meal.indexOf('swallow'),
+  `the meal played out of order: ${meal.join(' -> ')}`
+);
+check(
+  Math.abs(brain.x - TREAT_AT) < 40,
+  `the cat ate from ${brain.x.toFixed(0)} instead of walking to ${TREAT_AT}`
+);
+check(brain.offer === null, 'the offer outlived the meal');
+check(brain.action === 'sit' || brain.queue.length > 0, `stuck on '${brain.action}'`);
+
+// A file hovering over the cat: mouth open, and it stays open.
+settle(5);
+brain.command('offer', { x: brain.x });
+settle(1.2);
+check(brain.action === 'feed_wait', `hovering a file gave '${brain.action}'`);
+const waited = settle(8);
+check(
+  waited.length === 1 && waited[0] === 'feed_wait',
+  `the cat did not hold its mouth open: ${waited.join(' -> ')}`
+);
+console.log(`  hovering a file: held 'feed_wait' for 8s`);
+
+// The drag jiggling about must not restart the approach.
+const beforeJiggle = brain.seq;
+for (let i = 0; i < 40; i += 1) {
+  brain.command('offer', { x: brain.x + (i % 5) - 2 });
+  settle(0.05);
+}
+check(
+  brain.seq === beforeJiggle && brain.action === 'feed_wait',
+  `a jiggling drag restarted the chain ${brain.seq - beforeJiggle} time(s)`
+);
+console.log('  40 dragover ticks: no restart, still waiting');
+
+// Confirmed: the file goes down.
+brain.command('eat');
+const swallowed = settle(12);
+console.log(`  confirmed -> ${swallowed.join(' -> ')}`);
+check(swallowed.includes('chew'), `'eat' did not chew: ${swallowed.join(' -> ')}`);
+check(brain.offer === null, "'eat' left an offer behind");
+
+// Cancelled: the mouth closes again and the cat gets on with its life.
+settle(5);
+brain.command('offer', { x: brain.x });
+settle(1.5);
+brain.command('cancelFeed');
+const refused = settle(3);
+console.log(`  cancelled -> ${refused.join(' -> ')}`);
+check(refused.includes('feed_close'), `cancelling did not close up: ${refused.join(' -> ')}`);
+check(brain.offer === null, 'cancelling left an offer behind');
+
+// Nobody ever answers. The cat must not sit there gaping forever: this is the
+// backstop for a drag that ended somewhere the window never heard about.
+settle(5);
+brain.command('offer', { x: brain.x });
+const abandoned = settle(34);
+console.log(`  abandoned offer -> ${abandoned.join(' -> ')}`);
+check(
+  abandoned.includes('feed_close'),
+  `an abandoned offer never timed out: ${abandoned.join(' -> ')}`
+);
+check(brain.action !== 'feed_wait', `still waiting after 34s: '${brain.action}'`);
+check(brain.offer === null, 'an abandoned offer was never cleared');
+
+// Picked up mid-offer: the food is forgotten, not eaten later.
+settle(5);
+brain.command('offer', { x: brain.x });
+settle(1.5);
+brain.grab();
+check(brain.offer === null, 'being picked up left the offer behind');
+brain.release();
+settle(6);
+console.log('  picked up mid-offer: offer dropped');
+
+// Being fed must not break the ordinary loop afterwards.
+const afterMeals = settle(90);
+check(afterMeals.length > 3, `the cat stopped doing anything: ${afterMeals.join(' -> ')}`);
+check(
+  !FEEDING.includes(brain.action),
+  `left stuck in a feeding pose: '${brain.action}'`
+);
+console.log(`  90s later: back to ${afterMeals.length} ordinary action changes`);
 
 // ---- verdict --------------------------------------------------------------------------
 

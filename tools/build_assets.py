@@ -105,6 +105,7 @@ FAMILY_REF: dict[str, tuple[str, int]] = {
     "enw": ("stand", 3),  # anchor family; everything else matches this sit
     "new2": ("front", 0),
     "tilt": ("tilt", 0),
+    "feed": ("feed", 0),  # both feeding sheets open on a plain front sit
 }
 ANCHOR_FAMILY = "enw"
 
@@ -138,6 +139,14 @@ SHEETS: list[Sheet] = [
     # startle handing over to the enw turn looked like a different, growing cat.
     Sheet("startle", "rsrc/raw/new3/Designer.png", 2, 4, "magenta", "enw",
           "8-frame startle: f0 neutral stand -> f4/f5 arched and hissing -> f7 stand"),
+    # The feeding pair, drawn in one run and therefore one family. Both sheets open on
+    # a plain front sit, which is what ties them to the rest of the cat: f0 is the
+    # frame the family scale is measured on *and* the pose the animations hand back
+    # to, so a mouth opening can start from the resting sit without a jump.
+    Sheet("feed", "rsrc/raw/new-10.13/Designer.png", 2, 4, "magenta", "feed",
+          "front sit being offered food: f0 neutral -> f3 mouth wide open -> f7 neutral"),
+    Sheet("chew", "rsrc/raw/new-10.13/Designer (1).png", 2, 4, "magenta", "feed",
+          "front sit eating: f1 a mouthful -> f5 swallow -> f6 licks its muzzle -> f7 content"),
 ]
 
 
@@ -500,6 +509,31 @@ ACTIONS: list[Action] = [
     Action("wave", [("run", 7), ("run", 4), ("run", 5), ("run", 6), ("run", 5),
                     ("run", 7)],
            fps=7.0, loop=False, tags=["action", "front"]),
+
+    # ---- being fed -----------------------------------------------------------------
+    #
+    # Four clips out of two sheets. Both sheets' f0 is the plain front sit, so
+    # feed_open can start from the resting pose and swallow can hand back to it
+    # without a visible cut. feed_wait is the one that loops: it has to hold for as
+    # long as the user keeps dragging a file around, so it alternates a wide-open
+    # mouth with a narrower one and an occasional lick rather than freezing on a
+    # single gaping frame.
+    Action("feed_open", [("feed", 0), ("feed", 1), ("feed", 2), ("feed", 3)],
+           fps=8.0, loop=False, tags=["transition", "front"]),
+    Action("feed_wait", [("feed", 3), ("feed", 4), ("feed", 3), ("feed", 5)],
+           fps=3.0, loop=True, tags=["idle", "front"]),
+    # Nothing arrived, or the user cancelled: close up and go back to sitting.
+    Action("feed_close", [("feed", 2), ("feed", 6), ("feed", 7)],
+           fps=7.0, loop=False, tags=["transition", "front"]),
+    # Jaw working on a mouthful, with the content half-closed eyes between chews.
+    Action("chew", [("chew", 1), ("chew", 2), ("chew", 3), ("chew", 2),
+                    ("chew", 4), ("chew", 2)],
+           fps=7.0, loop=True, tags=["action", "front"]),
+    # Head up to get it down, a lick of the muzzle, then back to neutral so `sit`
+    # can take over.
+    Action("swallow", [("chew", 5), ("chew", 6), ("chew", 7), ("chew", 7),
+                       ("chew", 0)],
+           fps=4.0, loop=False, tags=["reaction", "front"]),
 
     # ---- being picked up and dropped -----------------------------------------------
     # Held is a single frame kept up for as long as the drag lasts: the strongest tilt

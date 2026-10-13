@@ -14,6 +14,9 @@
          transform so walking never costs an IPC round trip per frame. -->
     <div id="stage">
       <div id="hearts" aria-hidden="true"></div>
+      <!-- Food on the floor. Shown only while the brain has an offer, and placed
+           from JS, so the cat and its dinner can never disagree about where it is. -->
+      <img id="treat" src="../icons/fish.png" alt="" aria-hidden="true" hidden />
       <canvas id="cat" width="160" height="160"></canvas>
     </div>
     <div id="error" role="alert" hidden></div>

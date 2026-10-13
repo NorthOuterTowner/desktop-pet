@@ -21,6 +21,7 @@
     "assets": "python tools/build_assets.py",
     "assets:probe": "python tools/build_assets.py --probe",
     "icons": "python tools/build_icons.py",
+    "treat": "python tools/build_treat.py",
     "check:behavior": "node tools/_simulate.mjs",
     "check:app": "electron . --smoke",
     "dist": "node scripts/build-installers.mjs",

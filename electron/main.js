@@ -7,6 +7,7 @@ const {
   BrowserWindow,
   Menu,
   Tray,
+  dialog,
   ipcMain,
   nativeImage,
   protocol,
@@ -26,9 +27,17 @@ const ROOT = path.join(__dirname, '..');
 const HEARTBEAT_TIMEOUT_MS = 1500;
 const WATCHDOG_INTERVAL_MS = 500;
 
+// How often the cursor is polled, and why there is a poll at all: during an OS file
+// drag the drag source owns the mouse, so the forwarded mousemove events the renderer
+// normally hit-tests against stop arriving entirely. Without a second channel the
+// window's click-through state freezes mid-drag and the drop never lands on the cat.
+// 30 Hz is enough to keep up with a hand and costs one GetCursorPos per tick.
+const CURSOR_POLL_MS = 33;
+
 let win = null;
 let tray = null;
 let watchdog = null;
+let cursorPoll = null;
 let paused = false;
 
 // Mirrors the window's current mouse state so the watchdog knows whether a stall is
@@ -125,12 +134,27 @@ function createWindow() {
   releaseMouse();
   win.loadURL('app://local/src/index.html');
 
+  // Dropping a file on a Chromium window navigates to it unless something stops it,
+  // which would replace the pet with a picture of whatever was dropped. The renderer
+  // calls preventDefault on every drop it sees; this is the backstop for the one it
+  // misses, and it also shuts the door on popups.
+  win.webContents.on('will-navigate', (event, url) => {
+    if (url !== 'app://local/src/index.html') event.preventDefault();
+  });
+  win.webContents.on('will-frame-navigate', (event) => {
+    if (event.url !== 'app://local/src/index.html') event.preventDefault();
+  });
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+
   // Any way the renderer can die or wedge has to end with the mouse back in the
   // user's hands, not trapped by a full-work-area window.
   win.webContents.on('render-process-gone', () => releaseMouse('render process gone'));
   win.webContents.on('unresponsive', () => releaseMouse('renderer unresponsive'));
   win.on('unresponsive', () => releaseMouse('window unresponsive'));
-  win.on('closed', stopWatchdog);
+  win.on('closed', () => {
+    stopWatchdog();
+    stopCursorPoll();
+  });
 
   return win;
 }
@@ -168,6 +192,30 @@ function stopWatchdog() {
   watchdog = null;
 }
 
+// ---- cursor poll --------------------------------------------------------------------
+
+/** Last point sent, so a still cursor costs no IPC at all. */
+let lastCursor = { x: null, y: null };
+
+function startCursorPoll() {
+  stopCursorPoll();
+  cursorPoll = setInterval(() => {
+    if (!win || win.isDestroyed()) return;
+    const bounds = win.getBounds();
+    const point = screen.getCursorScreenPoint();
+    const x = point.x - bounds.x;
+    const y = point.y - bounds.y;
+    if (x === lastCursor.x && y === lastCursor.y) return;
+    lastCursor = { x, y };
+    send('pet:cursor', { x, y });
+  }, CURSOR_POLL_MS);
+}
+
+function stopCursorPoll() {
+  if (cursorPoll) clearInterval(cursorPoll);
+  cursorPoll = null;
+}
+
 function relayout() {
   if (!win || win.isDestroyed()) return;
   const bounds = stageBounds();
@@ -199,6 +247,9 @@ function buildMenu() {
   return Menu.buildFromTemplate([
     { label: 'Come here', click: () => command('come', { x: cursorStageX() }) },
     { label: 'Go for a walk', click: () => command('walk') },
+    // No position: the fish drops in next to the cat, wherever that is. The cursor is
+    // over by the tray when this is clicked, which is the last place to put dinner.
+    { label: 'Give a fish', click: () => command('feed') },
     { type: 'separator' },
     { label: 'Head tilt', click: () => command('tilt') },
     { label: 'Wave', click: () => command('wave') },
@@ -224,6 +275,213 @@ function buildMenu() {
 
 function refreshTrayMenu() {
   if (tray) tray.setContextMenu(buildMenu());
+}
+
+// ---- feeding ------------------------------------------------------------------------
+//
+// Two ways to feed the cat. A fish from the menu is make-believe and costs nothing.
+// Dropping one of your own files on it is not: the file is deleted, for good, which is
+// the whole joke and also the reason everything below leans towards saying no.
+
+/**
+ * How long "don't ask again" lasts, and deliberately only in memory: every launch
+ * starts by asking again. A pet that silently deletes files is worse than one more
+ * dialog.
+ */
+const SUPPRESS_MS = 5 * 60 * 1000;
+let suppressUntil = 0;
+// A second drop while the confirmation is still up would stack dialogs on a window
+// that cannot take focus.
+let askingAboutFood = false;
+
+function formatSize(bytes) {
+  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} bytes`;
+}
+
+/** Is `target` inside `dir`? Used to keep the cat out of places it must not eat. */
+function isInside(target, dir) {
+  const rel = path.relative(dir, target);
+  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+/**
+ * Why the cat must not eat this, or null if it may.
+ *
+ * Eating is an unrecoverable delete, so this errs towards refusing. Folders are out
+ * entirely -- "the cat ate my whole project" is not a feature -- along with anything
+ * belonging to the operating system or to the app itself.
+ */
+async function refuseToEat(target) {
+  const root = path.parse(target).root;
+  if (target === root) return 'a whole drive';
+
+  const own = [app.getAppPath(), path.dirname(process.execPath)];
+  if (own.some((dir) => dir && (target === dir || isInside(target, dir)))) {
+    return 'part of Desktop Cat itself';
+  }
+
+  // `isInside(home, target)` rather than the other way round: this is the check that
+  // catches C:\Users and /Users, the folders that *contain* the home folder.
+  const home = app.getPath('home');
+  if (target === home || isInside(home, target)) return 'your home folder';
+
+  const system =
+    process.platform === 'win32'
+      ? [
+          process.env.SystemRoot,
+          process.env.ProgramFiles,
+          process.env['ProgramFiles(x86)'],
+          process.env.ProgramData,
+        ]
+      : ['/System', '/Library', '/usr', '/bin', '/sbin', '/etc', '/Applications'];
+  if (system.some((dir) => dir && (target === dir || isInside(target, dir)))) {
+    return 'inside a system folder';
+  }
+
+  let stats;
+  try {
+    stats = await fs.promises.lstat(target);
+  } catch {
+    return 'not there any more';
+  }
+  if (stats.isDirectory()) return 'a folder, and the cat only eats one file at a time';
+  return null;
+}
+
+/** Everything the confirmation needs to say about what is about to be eaten. */
+async function describeMeal(files) {
+  let total = 0;
+  for (const file of files) {
+    try {
+      total += (await fs.promises.lstat(file)).size;
+    } catch {
+      /* counted as nothing; it is about to be deleted anyway */
+    }
+  }
+
+  const shown = files.slice(0, 4).map((file) => `  ${file}`);
+  if (files.length > shown.length) shown.push(`  …and ${files.length - shown.length} more`);
+
+  return {
+    message:
+      files.length === 1
+        ? `Feed “${path.basename(files[0])}” to the cat?`
+        : `Feed ${files.length} files to the cat?`,
+    detail: [
+      shown.join('\n'),
+      '',
+      `${formatSize(total)} in total. The cat eats it for good: this deletes the ` +
+        'file outright rather than moving it to the Recycle Bin, and there is ' +
+        'nothing to undo afterwards.',
+    ].join('\n'),
+  };
+}
+
+/**
+ * A file was dropped on the cat: ask, delete, then let the cat chew.
+ *
+ * The dialog is deliberately parentless. This window is `focusable: false` so the pet
+ * can never steal focus from what you are typing in, and a modal attached to a window
+ * that cannot take focus is a fine way to produce a dialog nobody can answer.
+ */
+async function feedFiles(paths) {
+  if (askingAboutFood) return;
+
+  const files = [
+    ...new Set(
+      (Array.isArray(paths) ? paths : [])
+        .filter((p) => typeof p === 'string' && p.length > 0)
+        .map((p) => path.resolve(p))
+    ),
+  ];
+  if (files.length === 0) {
+    command('cancelFeed');
+    return;
+  }
+
+  const edible = [];
+  const refused = [];
+  for (const file of files) {
+    const why = await refuseToEat(file);
+    if (why) refused.push(`${path.basename(file)} is ${why}`);
+    else edible.push(file);
+  }
+
+  if (edible.length === 0) {
+    command('cancelFeed');
+    askingAboutFood = true;
+    await dialog.showMessageBox({
+      type: 'info',
+      noLink: true,
+      title: 'Desktop Cat',
+      message: 'The cat will not eat that.',
+      detail: refused.join('\n'),
+      buttons: ['Fair enough'],
+    });
+    askingAboutFood = false;
+    return;
+  }
+
+  if (Date.now() >= suppressUntil) {
+    const { message, detail } = await describeMeal(edible);
+    askingAboutFood = true;
+    const choice = await dialog.showMessageBox({
+      type: 'warning',
+      noLink: true,
+      title: 'Desktop Cat',
+      message,
+      detail,
+      // Cancel first and as the default: the safe answer should be the one you get
+      // from hitting Enter or Escape by reflex.
+      buttons: ['Cancel', 'Feed it to the cat', 'Feed it, and stop asking for 5 minutes'],
+      defaultId: 0,
+      cancelId: 0,
+    });
+    askingAboutFood = false;
+
+    if (choice.response === 0) {
+      command('cancelFeed');
+      return;
+    }
+    if (choice.response === 2) suppressUntil = Date.now() + SUPPRESS_MS;
+  }
+
+  const eaten = [];
+  const stuck = [];
+  for (const file of edible) {
+    try {
+      await fs.promises.unlink(file);
+      eaten.push(file);
+    } catch (error) {
+      stuck.push(`${path.basename(file)}: ${error.message}`);
+    }
+  }
+
+  if (eaten.length > 0) {
+    console.log(`cat: ate ${eaten.length} file(s)\n  ${eaten.join('\n  ')}`);
+    command('eat');
+  } else {
+    command('cancelFeed');
+  }
+
+  if (stuck.length > 0) {
+    askingAboutFood = true;
+    await dialog.showMessageBox({
+      type: 'error',
+      noLink: true,
+      title: 'Desktop Cat',
+      message:
+        eaten.length > 0
+          ? 'Some of that would not go down.'
+          : 'The cat could not eat that.',
+      detail: stuck.join('\n'),
+      buttons: ['OK'],
+    });
+    askingAboutFood = false;
+  }
 }
 
 function trayIcon() {
@@ -263,12 +521,43 @@ ipcMain.on('pet:heartbeat', () => {
 
 ipcMain.on('pet:menu', () => {
   if (!win || win.isDestroyed()) return;
-  buildMenu().popup({ window: win });
+  const menu = buildMenu();
+
+  // The window is `focusable: false` so the pet can never steal keystrokes -- but a
+  // popup menu whose owner window cannot take focus is one Windows will not dismiss
+  // when you click away from it. It stayed open until something was clicked on the
+  // cat itself, which is a trap.
+  //
+  // So the window is lent focus for the life of the menu, which is what makes a click
+  // anywhere else close it, and takes it straight back afterwards. The blur handler is
+  // the belt to that braces: if the platform hands focus elsewhere without closing the
+  // menu, close it here.
+  const onBlur = () => menu.closePopup(win);
+  const restore = () => {
+    if (!win || win.isDestroyed()) return;
+    win.removeListener('blur', onBlur);
+    win.setFocusable(false);
+    win.blur();
+  };
+
+  win.setFocusable(true);
+  win.focus();
+  win.once('blur', onBlur);
+  menu.popup({ window: win, callback: restore });
 });
 
 ipcMain.handle('pet:stage', () => {
   const bounds = stageBounds();
   return { width: bounds.width, height: bounds.height, paused };
+});
+
+// Files dropped on the cat. The renderer never touches them; it only reports the
+// paths, and every decision about deleting anything happens here.
+ipcMain.on('pet:feed-files', (_event, paths) => {
+  feedFiles(paths).catch((error) => {
+    console.error('cat: feeding failed', error);
+    command('cancelFeed');
+  });
 });
 
 // ---- lifecycle ----------------------------------------------------------------------
@@ -286,6 +575,7 @@ if (!app.requestSingleInstanceLock()) {
     createWindow();
     createTray();
     startWatchdog();
+    startCursorPoll();
 
     if (process.env.CAT_SMOKE || process.argv.includes('--smoke')) {
       require('./_smoke').attach({
@@ -295,6 +585,15 @@ if (!app.requestSingleInstanceLock()) {
         // So the check can assert the window really did hand the mouse back, rather
         // than trusting the renderer's own view of it.
         isGrabbingMouse: () => grabbingMouse,
+        // The checks drive the cat with synthetic mouse events, which the real
+        // cursor's position would fight: the poll would immediately overwrite where
+        // the test says the pointer is. Only the drag-and-drop path needs it, and
+        // that cannot be driven synthetically anyway.
+        setCursorPoll: (on) => (on ? startCursorPoll() : stopCursorPoll()),
+        // The guard, not the whole feeding path: calling feedFiles would put a modal
+        // confirmation on screen and wait for a human. This is the part worth
+        // checking automatically anyway.
+        refuseToEat,
       });
     }
 
@@ -303,7 +602,10 @@ if (!app.requestSingleInstanceLock()) {
     screen.on('display-removed', relayout);
   });
 
-  app.on('before-quit', stopWatchdog);
+  app.on('before-quit', () => {
+    stopWatchdog();
+    stopCursorPoll();
+  });
 
   // The cat has no main window to close, so the tray drives the lifetime.
   app.on('window-all-closed', () => app.quit());
