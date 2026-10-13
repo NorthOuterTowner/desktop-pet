@@ -1,7 +1,7 @@
 /**
  * The cat's brain.
  *
- * No DOM, no Electron: it takes a time delta and decides which action is playing and
+ * No DOM, no native calls: it takes a time delta and decides which action is playing and
  * where the cat is. The view reads `action`, `elapsed`, `x`, `y` and `seq`.
  *
  * Behaviour is a queue of steps rather than a flat state enum, because almost
@@ -336,7 +336,10 @@ export class Brain {
     this.energy = Math.min(1, this.energy + 0.05);
     this.vx = 0;
     this.goal = null;
-    this.offer = { x: at, auto, bites: 0 };
+    // `ready` is flipped on when feed_open starts, so the fish does not appear or
+    // fall until the cat has arrived and begun opening its mouth. A dragged file has
+    // no sprite either way, so it does not matter there.
+    this.offer = { x: at, auto, bites: 0, ready: false };
     this._enqueue([
       ...this._approachSteps(at, { reach: OFFER_REACH }),
       { action: 'feed_open' },
@@ -598,12 +601,16 @@ export class Brain {
 
   _begin(step) {
     const clip = this.clips[step.action];
-    // Each chew takes a bite out of what is on the floor, which is what the view
-    // draws from.
+    // The fish is only shown once the cat has walked over and started opening its
+    // mouth -- not while it is still on its way. The view draws nothing until this is
+    // set, so the drop lines up with the mouth being ready to receive it.
+    if (step.action === 'feed_open' && this.offer) this.offer.ready = true;
+    // Each chew takes a bite out of what is in front of the cat, which is what the
+    // view draws from.
     if (step.bite != null && this.offer) this.offer.bites = step.bite;
     // The offer stops existing once it has gone down, or the cat has closed up and
-    // given up on it. Deliberately not at the first chew: a fish has to stay on the
-    // floor, getting smaller, for as long as the cat is working through it.
+    // given up on it. Deliberately not at the first chew: a fish has to stay in
+    // front of the cat, getting smaller, for as long as it is working through it.
     if (step.action === 'swallow' || step.action === 'feed_close') this.offer = null;
     this.action = step.action;
     this.elapsed = 0;

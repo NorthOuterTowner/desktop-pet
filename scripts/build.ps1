@@ -8,7 +8,7 @@
 
 .EXAMPLE
     .\scripts\build.ps1
-    .\scripts\build.ps1 --win --arch x64
+    .\scripts\build.ps1 --win --arch x64 --arch arm64
     .\scripts\build.ps1 --help
 #>
 
@@ -21,7 +21,18 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
     exit 1
 }
 
-if (-not (Test-Path (Join-Path $root 'node_modules/electron-builder'))) {
+# rustup installs into the user profile; a terminal opened before it ran will not
+# have it on PATH yet, so look there before giving up.
+$cargoBin = Join-Path $env:USERPROFILE '.cargo\bin'
+if (-not (Get-Command cargo -ErrorAction SilentlyContinue) -and (Test-Path $cargoBin)) {
+    $env:Path = "$env:Path;$cargoBin"
+}
+if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
+    Write-Error 'cargo is not on PATH. Install Rust from https://rustup.rs.'
+    exit 1
+}
+
+if (-not (Test-Path (Join-Path $root 'node_modules/@tauri-apps/cli'))) {
     Write-Host 'installing dependencies...'
     & npm --prefix $root ci
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

@@ -2,10 +2,9 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta
-      http-equiv="Content-Security-Policy"
-      content="default-src 'none'; img-src app:; script-src app:; style-src app:; connect-src app:;"
-    />
+    <!-- The Content-Security-Policy lives in src-tauri/tauri.conf.json, which Tauri
+         injects into the packaged page. A meta tag here would have to name the IPC
+         origins itself, which differ per platform. -->
     <title>Desktop Cat</title>
     <link rel="stylesheet" href="styles.css" />
   </head>

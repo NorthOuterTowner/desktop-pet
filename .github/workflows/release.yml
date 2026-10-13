@@ -1,16 +1,16 @@
 name: installers
 
 # An installer has to be built on the operating system it installs onto -- a .dmg
-# needs hdiutil -- so the two platforms are built on two runners and only brought
-# together at the end. Linux packaging was dropped: deb/rpm/AppImage were the slowest
-# part of a release and the least used.
+# needs hdiutil, the Windows build needs MSVC -- so the two platforms are built on two
+# runners and only brought together at the end. Each runner builds both CPU
+# architectures for its platform, one `tauri build` per architecture.
 #
 # What a push does:
 #   pull request            build both, publish nothing
 #   push to main/master     build both, then release v<package.json version> if
 #                           that release does not exist yet. So bumping the version
 #                           and pushing is all it takes to cut a release.
-#   push of a v* tag        build all three and release under that exact tag
+#   push of a v* tag        build both and release under that exact tag
 #   manual run              same as a push to main, with a switch to skip publishing
 
 on:
@@ -37,19 +37,22 @@ jobs:
   build:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    # Two release builds per runner with LTO on. A cold cache takes the longest.
+    timeout-minutes: 60
     strategy:
-      # One platform failing should not hide whether the other two are fine.
+      # One platform failing should not hide whether the other is fine.
       fail-fast: false
       matrix:
         include:
           - name: Windows setup .exe
             os: windows-latest
-            flag: --win
+            flag: --win --arch x64 --arch arm64
+            targets: x86_64-pc-windows-msvc,aarch64-pc-windows-msvc
             artifact: installers-windows
           - name: macOS .dmg
             os: macos-latest
-            flag: --mac
+            flag: --mac --arch arm64 --arch x64
+            targets: aarch64-apple-darwin,x86_64-apple-darwin
             artifact: installers-macos
 
     steps:
@@ -60,27 +63,24 @@ jobs:
           node-version: '22'
           cache: npm
 
-      # The Electron binaries and the packaging tools are ~200 MB per architecture and
-      # never change between runs of the same version.
-      - name: Cache Electron downloads
-        uses: actions/cache@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
-          path: |
-            ~/.cache/electron
-            ~/.cache/electron-builder
-            ~/Library/Caches/electron
-            ~/Library/Caches/electron-builder
-            ~\AppData\Local\electron\Cache
-            ~\AppData\Local\electron-builder\Cache
-          key: electron-${{ matrix.os }}-${{ hashFiles('package-lock.json') }}
-          restore-keys: electron-${{ matrix.os }}-
+          targets: ${{ matrix.targets }}
+
+      # Several hundred crates that only change when Cargo.lock does.
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: ${{ matrix.os }}
 
       - name: Install dependencies
         run: npm ci
 
       # The same script a developer runs locally. No signing certificates are
-      # configured, so the installers are unsigned -- see README.md for wiring up
-      # CSC_LINK / notarisation.
+      # configured, so the installers are unsigned (the macOS app is ad-hoc signed,
+      # which is what Apple silicon needs to run it at all) -- see README.md.
       - name: Build installers
         run: node scripts/build-installers.mjs ${{ matrix.flag }}
 
@@ -91,7 +91,6 @@ jobs:
           path: |
             dist/*.exe
             dist/*.dmg
-            dist/*.blockmap
             dist/SHA256SUMS-*.txt
             dist/installers-*.json
           if-no-files-found: error
@@ -181,6 +180,11 @@ jobs:
             echo "| Windows 10/11 | \`*-win-x64-setup.exe\` (\`arm64\` for Windows on ARM) |"
             echo "| macOS Apple silicon | \`*-mac-arm64.dmg\` |"
             echo "| macOS Intel | \`*-mac-x64.dmg\` |"
+            echo
+            echo "Installing over an older version replaces it, including the 1.x"
+            echo "Electron builds. On Windows the cat runs on the system WebView2,"
+            echo "which Windows 11 ships with; on an old Windows 10 without it, the"
+            echo "installer downloads it first."
             echo
             echo "Verify a download against \`SHA256SUMS.txt\`:"
             echo '```'

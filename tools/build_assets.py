@@ -1,5 +1,5 @@
 """
-Cut every raw cat sheet into per-action sprite folders for the Electron app.
+Cut every raw cat sheet into per-action sprite folders for the app.
 
 The raw art arrives in three different shapes and this tool normalises all of it:
 

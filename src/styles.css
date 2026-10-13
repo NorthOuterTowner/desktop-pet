@@ -49,9 +49,9 @@ body.carrying.over-cat {
   pointer-events: none;
 }
 
-/* The treat sits behind the cat so a mouthful reads as going *into* the mouth, and
-   never takes a click: dropping a file is a drag, and the window must not start
-   treating the fish as a drop target of its own. */
+/* The treat sits beside the cat and never takes a click: dropping a file is a drag,
+   and the window must not start treating the fish as a drop target of its own.
+   `bottom` is set from JS to the cat's mouth height; the fall below ends there. */
 #treat {
   position: absolute;
   bottom: 0;
@@ -60,10 +60,11 @@ body.carrying.over-cat {
   animation: treat-drop 620ms linear;
 }
 
-/* Dropped in from off the top of the screen. `--drop` is set from JS to the height of
-   the window, so the fish arrives from above wherever the taskbar happens to be.
-   The fall is shaped by the keyframe stops rather than by an easing curve, because
-   the same curve would also apply to the bounce at the end and make it mushy. */
+/* The fish drops in from off the top of the screen down to the cat's mouth, where the
+   element's `bottom` holds it. `--drop` is set from JS to the distance from the mouth
+   up to the top edge, so the fall always starts off-screen wherever the mouth is. The
+   fall is shaped by the keyframe stops rather than an easing curve, because the same
+   curve would also apply to the bounce at the end and make it mushy. */
 @keyframes treat-drop {
   0% {
     transform: translateY(var(--drop, -600px)) rotate(-20deg);
@@ -77,7 +78,7 @@ body.carrying.over-cat {
   70% {
     transform: translateY(0) rotate(4deg);
   }
-  /* Something that stops dead on the floor looks pinned to it. */
+  /* A small rebound, so the fish does not stop dead the instant it arrives. */
   82% {
     transform: translateY(-11px) rotate(-2deg);
   }
@@ -130,4 +131,79 @@ body.carrying.over-cat {
   color: #ffd7d7;
   font: 12px/1.5 Consolas, "Cascadia Mono", monospace;
   white-space: pre-wrap;
+}
+
+/* ---- Settings -----------------------------------------------------------------------
+
+   A floating panel next to the cat, not a full-screen modal. It takes events only
+   within its own bounds: the renderer's hit test makes the window interactive only
+   while the cursor is over the panel (or a press on it is still held). */
+#settings {
+  position: absolute;
+  width: 300px;
+  padding: 18px 20px 16px;
+  border-radius: 12px;
+  background: rgba(28, 30, 38, 0.97);
+  border: 1px solid rgba(140, 170, 220, 0.25);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  color: #e8edf6;
+  font: 13px/1.4 "Segoe UI", system-ui, sans-serif;
+  cursor: default;
+  z-index: 10;
+  /* Initially hidden; toggled by show()/hide() via the hidden attribute. */
+}
+
+#settings[hidden] {
+  display: none;
+}
+
+.settings-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: -18px -20px 14px;
+  padding: 12px 20px 8px;
+  /* The title bar is the drag handle. */
+  cursor: move;
+  user-select: none;
+}
+
+.settings-row {
+  display: grid;
+  grid-template-columns: 68px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.settings-label {
+  color: #aeb8c8;
+}
+
+.settings-value {
+  min-width: 44px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: #cbd6e8;
+}
+
+.settings-row input[type='range'] {
+  width: 100%;
+  accent-color: #7fb0ff;
+  cursor: pointer;
+}
+
+.settings-close {
+  display: block;
+  margin: 16px 0 0 auto;
+  padding: 6px 18px;
+  border: 0;
+  border-radius: 7px;
+  background: #4f78c8;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.settings-close:hover {
+  background: #5d87d8;
 }

@@ -320,9 +320,30 @@ brain.command('come', { x: 900 });
 settle(14);
 brain.command('feed', { x: TREAT_AT });
 check(brain.offer !== null, "'feed' did not create an offer");
-const meal = settle(26);
-console.log(`  fish at ${TREAT_AT}: ${meal.join(' -> ')}`);
-check(meal.includes('feed_open'), `the cat never opened its mouth: ${meal.join(' -> ')}`);
+// The fish must not be shown until the cat has arrived and started opening its mouth:
+// `ready` is what the view keys the sprite off. It must stay false through the walk
+// over, and the frame it first turns true must be feed_open, not a walking frame.
+check(brain.offer.ready === false, "the fish was marked ready before the cat set off");
+let readyAction = null;
+let ateAtX = null;
+const meal = [];
+for (let i = 0; i < Math.round(26 / dt); i += 1) {
+  const wasReady = brain.offer && brain.offer.ready;
+  brain.update(dt);
+  if (meal[meal.length - 1] !== brain.action) meal.push(brain.action);
+  if (readyAction === null && !wasReady && brain.offer && brain.offer.ready) {
+    readyAction = brain.action;
+    ateAtX = brain.x; // where it was standing when the fish appeared
+  }
+}
+check(
+  readyAction === 'feed_open',
+  `the fish appeared during '${readyAction}', not when the mouth opened`
+);
+check(
+  ateAtX !== null && Math.abs(ateAtX - TREAT_AT) < 40,
+  `the cat ate from ${ateAtX?.toFixed(0)} instead of walking to ${TREAT_AT}`
+);
 check(meal.includes('chew'), `the cat never chewed: ${meal.join(' -> ')}`);
 check(meal.includes('swallow'), `the cat never swallowed: ${meal.join(' -> ')}`);
 check(
@@ -330,24 +351,29 @@ check(
     meal.indexOf('chew') < meal.indexOf('swallow'),
   `the meal played out of order: ${meal.join(' -> ')}`
 );
-check(
-  Math.abs(brain.x - TREAT_AT) < 40,
-  `the cat ate from ${brain.x.toFixed(0)} instead of walking to ${TREAT_AT}`
-);
 check(brain.offer === null, 'the offer outlived the meal');
-check(brain.action === 'sit' || brain.queue.length > 0, `stuck on '${brain.action}'`);
+console.log(`  fish at ${TREAT_AT}: walked to ${ateAtX?.toFixed(0)}, fish shown at '${readyAction}' -> ${meal.join(' -> ')}`);
 
-// A file hovering over the cat: mouth open, and it stays open.
+// Settle back to a plain sit before the next case, which assumes a resting cat.
+settle(10);
+
+// A file hovering over the cat: it walks over, opens its mouth, and holds it open.
 settle(5);
 brain.command('offer', { x: brain.x });
-settle(1.2);
+// Let the approach and the mouth-opening play out, however many frames that is, then
+// check it settled into the open-mouthed wait rather than guessing a delay.
+const opening = settle(4);
 check(brain.action === 'feed_wait', `hovering a file gave '${brain.action}'`);
+check(
+  opening.includes('feed_open') && opening.includes('feed_wait'),
+  `the mouth did not open before waiting: ${opening.join(' -> ')}`
+);
 const waited = settle(8);
 check(
   waited.length === 1 && waited[0] === 'feed_wait',
   `the cat did not hold its mouth open: ${waited.join(' -> ')}`
 );
-console.log(`  hovering a file: held 'feed_wait' for 8s`);
+console.log(`  hovering a file: ${opening.join(' -> ')}, then held for 8s`);
 
 // The drag jiggling about must not restart the approach.
 const beforeJiggle = brain.seq;

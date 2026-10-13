@@ -1,5 +1,9 @@
+// First, so `window.pet` exists before anything below runs.
+import './bridge.js';
 import { loadSprites, frameAt } from './sprites.js';
 import { Brain } from './behavior.js';
+import { Audio_ } from './audio.js';
+import { Settings } from './settings.js';
 
 const SPRITE_BASE = '../assets/sprites/';
 const HEART_ICON = '../icons/icons8-heart-48.png';
@@ -37,6 +41,10 @@ const TREAT_SCALE = 0.45;
 // render box. Far enough out to clear the tail, which is the widest thing the cat
 // has and otherwise sits right on top of its dinner.
 const TREAT_OFFSET = 0.4;
+// Where the fish comes to rest, measured down from the top of the cat's box as a
+// fraction of its height: roughly the mouth of the open-mouthed sit. The fall now
+// stops here rather than on the floor, so the fish lands at the cat's mouth.
+const TREAT_MOUTH = 0.52;
 // How far the mouse has to move with the button down before a click becomes a drag.
 const DRAG_THRESHOLD = 4;
 // Proof of life for the main process while the cat holds the mouse.
@@ -55,6 +63,8 @@ const errorEl = document.getElementById('error');
 
 let sprites = null;
 let brain = null;
+let audio = null;
+let settings = null;
 // catSize is a placeholder until the manifest loads; applyStage derives the real one.
 let stage = { width: 0, height: 0, catSize: 0 };
 let footOffset = 0;
@@ -72,16 +82,31 @@ let beatIn = 0;
 // Set on mousedown over the cat; becomes a drag once the mouse moves far enough.
 let press = null;
 
-// True between dropping a file and the main process coming back with the user's
-// answer. Some platforms fire a dragleave straight after a successful drop, and
-// acting on it would snap the cat's mouth shut while the confirmation is still up.
+// True between dropping a file and the native side coming back with the user's
+// answer. A leave can follow a successful drop, and acting on it would snap the
+// cat's mouth shut while the confirmation is still up.
 let awaitingFeedAnswer = false;
 
 // ---- layout ---------------------------------------------------------------------------
 
-/** Render box size that puts the drawn cat at TARGET_SIT_HEIGHT screen pixels. */
+/**
+ * Render box size that puts the drawn cat at TARGET_SIT_HEIGHT screen pixels, scaled
+ * by the Settings "cat size" slider (1.0 until it loads, so boot is unaffected).
+ */
 function catBoxSize() {
-  return Math.round((TARGET_SIT_HEIGHT * sprites.canvas) / sprites.sitHeight);
+  const scale = settings ? settings.catScale : 1;
+  return Math.round((TARGET_SIT_HEIGHT * scale * sprites.canvas) / sprites.sitHeight);
+}
+
+/** Re-apply the layout at the current size, after the cat-size slider moves. */
+function relayoutForSize() {
+  if (!sprites) return;
+  const before = stage.catSize;
+  applyStage(stage);
+  // Keep the cat's left edge from drifting as it grows: nudge x so its centre holds.
+  if (brain && before) {
+    brain.x = Math.min(Math.max(brain.x + (before - stage.catSize) / 2, brain.minX), brain.maxX);
+  }
 }
 
 function applyStage(info) {
@@ -182,10 +207,19 @@ function overCatAt(clientX, clientY) {
  * click-through, or the pet would swallow every click on the desktop.
  */
 function updateHit() {
+  // The Settings panel is non-modal: the window only takes the mouse while the cursor
+  // is over the panel (like the cat), so the rest of the desktop stays clickable.
+  // A press that started on the panel (slider drag, title drag) keeps the mouse until
+  // release, even if the cursor slides off the panel mid-drag.
+  const overSettings =
+    !!settings &&
+    settings.open &&
+    (settings.capturing || (!!lastMouse && settings.contains(lastMouse.x, lastMouse.y)));
+
   // While the cat is being carried the window has to keep taking input even when the
   // cursor runs ahead of the sprite, otherwise the drag drops the moment you move
   // faster than the cat follows.
-  const over = brain.held
+  const over = brain.held || overSettings
     ? true
     : lastMouse
       ? overCatAt(lastMouse.x, lastMouse.y)
@@ -201,9 +235,17 @@ function updateHit() {
 
 // ---- the treat ------------------------------------------------------------------------
 
-/** Drawn size of the fish, keeping its own aspect. */
+/**
+ * Drawn size of the fish, keeping its own aspect.
+ *
+ * The fish has an *absolute* size, not scaled to the cat. Its length is a fraction of
+ * the default cat height (TARGET_SIT_HEIGHT = 124px), so at 100% the fish is exactly
+ * as long as a default-sized cat. Resizing the cat does NOT change the fish.
+ * TREAT_SCALE is the default; the slider replaces it.
+ */
 function treatBox() {
-  const width = Math.round(TARGET_SIT_HEIGHT * TREAT_SCALE);
+  const scale = settings ? settings.fishScale : TREAT_SCALE;
+  const width = Math.round(TARGET_SIT_HEIGHT * scale);
   const ratio =
     treatEl.naturalWidth && treatEl.naturalHeight
       ? treatEl.naturalHeight / treatEl.naturalWidth
@@ -228,7 +270,11 @@ let treatLeft = null;
 function placeTreat() {
   const offer = brain.offer;
   const bites = offer?.bites ?? 0;
-  const src = offer && offer.auto ? TREAT_STAGES[bites] : undefined;
+  // Only a fish, and only once the cat has arrived and started opening its mouth
+  // (`ready`). Before that the offer exists but the cat is still walking over, so
+  // nothing should fall yet. A dragged file never has `auto`, so never a sprite:
+  // putting a fish on the floor for it would say the cat ate a fish, not the file.
+  const src = offer && offer.auto && offer.ready ? TREAT_STAGES[bites] : undefined;
 
   if (!src) {
     if (!treatEl.hidden) {
@@ -244,14 +290,21 @@ function placeTreat() {
   // right that the fish would hang off the screen.
   const side = centre + stage.catSize * TREAT_OFFSET + width / 2 > stage.width ? -1 : 1;
   const left = Math.round(centre + side * stage.catSize * TREAT_OFFSET - width / 2);
+  // Rest the fish at the cat's mouth, not on the floor: the top of the cat's box is
+  // `catTop()` window pixels down, and the mouth is TREAT_MOUTH of the way into it.
+  // `bottom` is measured up from the window's bottom edge.
+  const mouthBottom = Math.round(
+    window.innerHeight - (catTop() + stage.catSize * TREAT_MOUTH) - height / 2
+  );
 
   if (treatEl.hidden) {
     treatEl.width = width;
     treatEl.height = height;
-    // How far up the fall starts, set per drop so the fish always comes in off the
-    // top of the screen rather than from a fixed distance above the floor. Showing
-    // the element is what starts the animation, so this has to be set first.
-    treatEl.style.setProperty('--drop', `${-(window.innerHeight - height)}px`);
+    treatEl.style.bottom = `${mouthBottom}px`;
+    // How far up the fall starts, set per drop so the fish always comes in from off
+    // the top of the screen rather than a fixed distance above where it lands.
+    // Showing the element is what starts the drop animation, so set this first.
+    treatEl.style.setProperty('--drop', `${-(window.innerHeight - mouthBottom)}px`);
     treatEl.hidden = false;
   }
   if (treatEl.getAttribute('src') !== src) treatEl.setAttribute('src', src);
@@ -322,6 +375,8 @@ function wireEvents() {
     // receives a mousedown at all while it has the mouse, so this is a precision
     // check on top of the OS-level gate, not a replacement for it.
     if (event.button !== 0 || !overCatAt(event.clientX, event.clientY)) return;
+    // The panel sits above the cat; a press on it belongs to the panel.
+    if (settings.open && settings.contains(event.clientX, event.clientY)) return;
     lastDragMove = performance.now();
     press = {
       x: event.clientX,
@@ -345,8 +400,12 @@ function wireEvents() {
   });
 
   // Leaving the window mid-drag counts as letting go.
+  //
+  // `lastMouse` is deliberately left alone. The native cursor poll is what keeps it
+  // current, and it only reports movement: the window flipping back to click-through
+  // can fire a mouseleave under a cursor that then holds still, and forgetting where
+  // the pointer is would leave the cat deaf to it until the mouse moved again.
   document.addEventListener('mouseleave', () => {
-    lastMouse = null;
     endDrag();
   });
 
@@ -362,49 +421,43 @@ function wireEvents() {
 
   // ---- being fed a file ----------------------------------------------------------
   //
-  // These only ever fire while the window holds the mouse, which the main process
-  // only grants while the cursor is on the cat's own pixels -- so a drag that gets
-  // this far is a drag over the cat, and no extra hit test is needed.
-  //
-  // preventDefault on dragover is what makes the window a drop target at all; the
-  // one on drop is what stops Chromium from navigating this window to the dropped
-  // file, which would replace the pet with a picture of it.
-  document.addEventListener('dragover', (event) => {
-    event.preventDefault();
-    if (!hasFiles(event.dataTransfer)) return;
-    event.dataTransfer.dropEffect = 'move';
-    // Offer it where the cursor is, converted to where the cat should stand.
-    brain.offerFood(event.clientX - stage.catSize / 2);
-  });
-
-  document.addEventListener('dragleave', (event) => {
-    // dragleave also fires when crossing between child elements; a null
-    // relatedTarget is the one that means the pointer really left the window.
-    if (event.relatedTarget === null && !awaitingFeedAnswer) brain.cancelOffer();
-  });
-
-  document.addEventListener('dragend', () => {
-    if (!awaitingFeedAnswer) brain.cancelOffer();
-  });
-
-  document.addEventListener('drop', (event) => {
-    event.preventDefault();
-    const files = [...(event.dataTransfer?.files ?? [])];
-    // File.path was removed from Electron, so the real path comes from the preload's
-    // webUtils bridge instead.
-    const paths = files.map((file) => window.pet.pathForFile(file)).filter(Boolean);
-    if (paths.length === 0) {
-      brain.cancelOffer();
-      return;
+  // The native side owns the drag: it only reaches this window while the window has
+  // the mouse, which it only has while the cursor is on the cat's own pixels -- so a
+  // drag that gets this far is a drag over the cat, and no extra hit test is needed.
+  // The page is told where the drag is and never which files; whether anything gets
+  // eaten is decided natively, after asking.
+  window.pet.onDrag(({ kind, x }) => {
+    switch (kind) {
+      case 'over':
+        // Offer it where the cursor is, converted to where the cat should stand.
+        brain.offerFood(x - stage.catSize / 2);
+        return;
+      case 'drop':
+        // The cat keeps its mouth open while the user answers the confirmation. The
+        // native side replies with 'eat' or 'cancelFeed'.
+        awaitingFeedAnswer = true;
+        return;
+      case 'leave':
+        if (!awaitingFeedAnswer) brain.cancelOffer();
+        return;
+      default:
+        return;
     }
-    // The cat keeps its mouth open while the user answers the confirmation. The main
-    // process replies with 'eat' or 'cancelFeed'.
-    awaitingFeedAnswer = true;
-    window.pet.feedFiles(paths);
   });
 
   window.pet.onCommand((payload) => {
     const { name, ...data } = payload ?? {};
+    // Settings is a view concern, not a brain one: open the panel next to the cat.
+    if (name === 'settings') {
+      if (settings.open) {
+        settings.hide();
+      } else {
+        // Pass the cat's current position: left edge, width, and bottom edge from the
+        // window top. The panel will position itself beside the cat.
+        settings.show(brain.x, stage.catSize, floorTop());
+      }
+      return;
+    }
     if (name === 'eat' || name === 'cancelFeed') awaitingFeedAnswer = false;
     brain.command(name, data);
     if (name === 'tilt') spawnHeart();
@@ -413,18 +466,14 @@ function wireEvents() {
   });
   window.pet.onResized(applyStage);
 
-  // The forwarded mousemove stream stops dead during an OS file drag: the drag
-  // source has the mouse captured, so no other window hears about it. Without this
-  // the hit test would freeze at whatever it last saw, the window would stay
-  // click-through, and the drop would never reach us at all.
+  // Where the pointer is while the window is click-through, which is almost always.
+  // A click-through window hears nothing of the mouse, so without this the hit test
+  // would never see the pointer arrive on the cat and the window would never take
+  // the mouse back. While the window does have the mouse, ordinary mousemove events
+  // keep `lastMouse` current as well; the two agree, both being CSS pixels.
   window.pet.onCursor((point) => {
     lastMouse = point;
   });
-}
-
-/** Is this drag carrying files, as opposed to text or a browser selection? */
-function hasFiles(transfer) {
-  return Boolean(transfer) && [...transfer.types].includes('Files');
 }
 
 // ---- boot -----------------------------------------------------------------------------
@@ -459,12 +508,20 @@ async function main() {
   });
   if (info.paused) brain.setPaused(true);
 
+  audio = new Audio_();
+
+  settings = new Settings({
+    onVolume: (level) => audio.setVolume(level),
+  });
+  // The cat-size slider resizes the live cat; the fish-size one is read when a fish
+  // next appears, so it needs no callback.
+  settings.onCatSize = () => relayoutForSize();
+
   wireEvents();
 
-  // Handle for diagnostics from the main process (see electron/_smoke.js) and for
-  // poking at behaviour from devtools. `overCatAt` is the same lookup the frame loop
-  // uses, exposed so the hit test can be checked without depending on where the real
-  // cursor happens to be -- synthetic mouse events race with forwarded real ones.
+  // Handle for poking at behaviour from the WebView's devtools in a debug build.
+  // `overCatAt` is the same lookup the frame loop uses, exposed so the hit test can be
+  // checked without depending on where the real cursor happens to be.
   window.__catDebug = {
     brain,
     spawnHeart,
@@ -473,6 +530,7 @@ async function main() {
     floorTop,
     catTop,
     treatEl,
+    audio,
   };
 
   let last = performance.now();
@@ -490,6 +548,7 @@ async function main() {
     brain.update(dt);
     draw(dt);
     placeTreat();
+    audio.update(brain.action);
     updateHit();
 
     if (interactive) {

@@ -1,0 +1,45 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Desktop Cat",
+  "version": "../package.json",
+  "identifier": "dev.desktopcat.pet",
+  "build": {
+    "frontendDist": "../.web",
+    "beforeDevCommand": "npm run stage",
+    "beforeBuildCommand": "npm run stage"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self'; script-src 'self'; style-src 'self'; media-src 'self'; connect-src 'self' ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "publisher": "desktop-cat",
+    "copyright": "Copyright © desktop-cat contributors",
+    "homepage": "https://github.com/NorthOuterTowner/desktop-pet",
+    "category": "Entertainment",
+    "shortDescription": "A desktop cat that naps on your taskbar",
+    "longDescription": "A desktop pet. A cat sits along the bottom of your screen on top of the taskbar, blinks, gets up for a walk, grooms itself and curls up for a nap when you leave it alone. Mouse input passes straight through it everywhere except its own pixels, so it never gets in the way of anything else.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "installerHooks": "windows/hooks.nsh",
+        "compression": "lzma"
+      }
+    },
+    "macOS": {
+      "signingIdentity": "-"
+    }
+  }
+}

@@ -5,12 +5,14 @@ that the tray uses -- so the icons are derived from that rather than drawn separ
 Nothing here is needed to run the app; it is a build-time step whose output is
 committed, so packaging (and CI) never needs Python.
 
-    python tools/build_icons.py
+    python tools/build_icons.py     # or `npm run icons`, which also runs the step below
 
 Writes:
-    build/icon.png          1024px master. electron-builder derives .icns from it.
-    build/icon.ico          multi-resolution Windows icon, used by the NSIS installer.
-    build/icons/<n>x<n>.png the hicolor sizes Linux .deb/.rpm install into the theme.
+    build/icon.png          1024px master. `tauri icon` derives every bundle icon
+                            in src-tauri/icons/ (.ico, .icns, the PNG sizes) from it.
+    build/icon.ico          multi-resolution Windows icon.
+    build/icons/<n>x<n>.png square PNGs at fixed sizes. 32x32 is compiled into the
+                            app as its tray icon.
 """
 
 from __future__ import annotations

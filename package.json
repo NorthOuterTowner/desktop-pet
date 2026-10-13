@@ -8,22 +8,21 @@
     "type": "git",
     "url": "git+https://github.com/NorthOuterTowner/desktop-pet.git"
   },
-  "main": "electron/main.js",
   "private": true,
   "license": "MIT",
   "author": {
     "name": "desktop-cat",
     "email": "NorthOuterTowner@users.noreply.github.com"
   },
-  "desktopName": "desktop-cat.desktop",
   "scripts": {
-    "start": "electron .",
+    "start": "tauri dev",
+    "stage": "node scripts/stage-web.mjs",
+    "tauri": "tauri",
     "assets": "python tools/build_assets.py",
     "assets:probe": "python tools/build_assets.py --probe",
-    "icons": "python tools/build_icons.py",
+    "icons": "python tools/build_icons.py && tauri icon build/icon.png --output src-tauri/icons",
     "treat": "python tools/build_treat.py",
     "check:behavior": "node tools/_simulate.mjs",
-    "check:app": "electron . --smoke",
     "dist": "node scripts/build-installers.mjs",
     "dist:win": "node scripts/build-installers.mjs --win",
     "dist:mac": "node scripts/build-installers.mjs --mac",
@@ -31,7 +30,6 @@
     "pack": "node scripts/build-installers.mjs --dir"
   },
   "devDependencies": {
-    "electron": "44.7.0",
-    "electron-builder": "26.15.3"
+    "@tauri-apps/cli": "2.12.2"
   }
 }

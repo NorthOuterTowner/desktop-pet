@@ -9,7 +9,17 @@ out/
 # rust / tauri build output. Gigabytes of compiled crates, and `gen/` is generated
 # from tauri.conf.json on every build.
 target/
+src-tauri/gen/
 spike/**/src-tauri/gen/
+
+# The page as Tauri embeds it: src/, assets/sprites/ and icons/ copied side by side
+# by scripts/stage-web.mjs on every dev run and build.
+.web/
+
+# `tauri icon` always writes mobile icons as well. This app ships for Windows and
+# macOS only.
+src-tauri/icons/android/
+src-tauri/icons/ios/
 
 # python
 __pycache__/
@@ -17,7 +27,7 @@ __pycache__/
 .venv/
 venv/
 
-# QA output from npm run check:app
+# QA output from the asset pipeline
 rsrc/_check/
 
 # logs

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Merged into the bundle's Info.plist by the Tauri bundler.
+
+  The pet lives in the menu bar and has no window to switch to, so it must not take a
+  Dock tile or turn up in the app switcher. The app also sets the Accessory activation
+  policy at runtime, which is what covers `npm start`; this covers the packaged app
+  from the very first frame, before any code has run.
+-->
+<plist version="1.0">
+  <dict>
+    <key>LSUIElement</key>
+    <true/>
+  </dict>
+</plist>

@@ -1,0 +1,46 @@
+[package]
+name = "desktop-cat"
+# Not where the release version comes from: tauri.conf.json reads it out of
+# package.json, so a version bump stays a one-line edit there. Kept in step anyway so
+# cargo's own output is not misleading.
+version = "1.1.0"
+description = "A desktop cat that sits on your taskbar, wanders about and naps"
+authors = ["desktop-cat"]
+license = "MIT"
+edition = "2024"
+# tauri-plugin-single-instance needs 1.90.
+rust-version = "1.90"
+
+[build-dependencies]
+tauri-build = { version = "=2.7.2", features = [] }
+
+[dependencies]
+# tray-icon for the menu-bar/tray presence, image-png so the tray can decode the
+# committed PNG icon at startup.
+tauri = { version = "=2.12.3", features = ["tray-icon", "image-png"] }
+tauri-plugin-single-instance = "=2.5.3"
+# Native message boxes with three custom buttons: TaskDialog on Windows, NSAlert on
+# macOS. The default features are all Linux portal plumbing, which this app does not
+# ship for. common-controls-v6 is what makes custom button labels possible on
+# Windows; tauri-build's default manifest already opts the exe into comctl32 v6.
+rfd = { version = "=0.17.2", default-features = false, features = ["common-controls-v6"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Only for handing keyboard focus back to whatever had it after the cat's right-click
+# menu closes. Same major as tauri-runtime-wry's, so nothing is compiled twice.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
+[profile.release]
+# Size over speed. The heavy lifting happens in the system WebView; nothing in this
+# binary is hot enough for opt-level 3 to matter, and "s" takes a sizeable bite out of
+# the installer.
+opt-level = "s"
+codegen-units = 1
+lto = true
+panic = "abort"
+strip = true

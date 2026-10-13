@@ -1,19 +1,30 @@
 # desktop-cat
 
-An Electron desktop pet. A cat sits along the bottom of your screen on top of the
-taskbar, blinks, gets up for a walk, grooms itself and curls up for a nap when you
-leave it alone. Click it and it tilts its head at you with a little heart. Pick it up
-and drop it and it lands with its fur up.
+A desktop pet. A cat sits along the bottom of your screen on top of the taskbar,
+blinks, gets up for a walk, grooms itself and curls up for a nap when you leave it
+alone. Click it and it tilts its head at you with a little heart. Pick it up and drop
+it and it lands with its fur up.
+
+It is a [Tauri 2](https://tauri.app) app: the page in `src/` runs in the system's own
+WebView -- WebView2 on Windows, WKWebView on macOS -- and a small Rust process in
+`src-tauri/` owns the window, the tray and anything that touches a file. That is why
+the Windows installer is about 6 MB where the Electron build it replaced was 100 MB:
+there is no copy of Chromium inside it.
 
 ## Run
+
+You need Node.js 20+ and Rust ([rustup.rs](https://rustup.rs)). On Windows, Rust also
+needs the MSVC build tools, which Visual Studio's "Desktop development with C++"
+workload or the standalone Build Tools provide.
 
 ```powershell
 npm install
 npm start
 ```
 
-There is no main window and no taskbar entry. Everything is driven from the tray icon
-or by right-clicking the cat.
+The first `npm start` compiles a few hundred crates and takes a few minutes; after
+that it is seconds. There is no main window and no taskbar entry. Everything is driven
+from the tray icon or by right-clicking the cat.
 
 ## Interacting
 
@@ -35,15 +46,15 @@ at most. It then eats it in three bites, and the fish on the floor goes whole, b
 crumbs, gone as it does. "Pause" freezes everything, down to the frame it is showing.
 
 The cat's own right-click menu borrows focus for as long as it is open. The window is
-`focusable: false` everywhere else, but a popup menu whose owner cannot take focus is
+not focusable everywhere else, but a popup menu whose owner cannot take focus is
 one Windows will not dismiss when you click away from it -- it used to sit there until
 something was clicked on the cat itself.
 
 ### Feeding it your files
 
 Dragging one of your own files onto the cat is the same gesture, with real
-consequences: the cat eats the file, and eating means `unlink`. No Recycle Bin, no
-undo. So the file path is deliberately the slow one:
+consequences: the cat eats the file, and eating means deleting it outright. No Recycle
+Bin, no undo. So the file path is deliberately the slow one:
 
 - Hovering a file over the cat only opens its mouth. Nothing is touched, and letting
   go anywhere else, or just waiting 25 seconds, closes it again. No fish appears: the
@@ -57,8 +68,10 @@ undo. So the file path is deliberately the slow one:
   folder, anything inside a system folder, and anything belonging to Desktop Cat
   itself. The cat eats one file at a time, not your projects.
 
-The renderer never touches the filesystem. It reports the dropped paths and nothing
-else; every decision and the deletion itself happen in the main process.
+The page never even sees the paths. It is told where a drag is, so the cat can open
+its mouth in the right place, and then 'eat' or 'cancelFeed'; every decision and the
+deletion itself happen in `src-tauri/src/feed.rs`, and the page's capability file
+grants it no filesystem access at all.
 
 The cat is always drawn at the same size. There is deliberately no size setting; to
 change it, move `TARGET_SIT_HEIGHT` in `src/renderer.js`.
@@ -69,21 +82,25 @@ The window spans the whole work area so the cat can be carried anywhere, which m
 not interfering with other applications the main design constraint rather than an
 afterthought.
 
-- **Mouse input passes straight through.** The window runs with
-  `setIgnoreMouseEvents(true, { forward: true })` and only takes input while the
-  cursor is over an opaque pixel of the cat, tested per-pixel against the alpha
-  channel of the frame currently showing. Everywhere else, clicks go to whatever is
-  behind it.
+- **Mouse input passes straight through.** The window ignores the cursor
+  (`set_ignore_cursor_events`) and only takes input while the cursor is over an
+  opaque pixel of the cat, tested per-pixel against the alpha channel of the frame
+  currently showing. Everywhere else, clicks go to whatever is behind it.
+- **The cursor is polled, not forwarded.** A click-through window hears nothing of
+  the mouse, so the Rust side reads the cursor position 60 times a second and hands it
+  to the page, which runs the hit test and asks for the mouse back when the pointer is
+  on the cat. It only sends anything when the cursor moves. (Electron could forward
+  mouse moves to a click-through window; Tauri cannot, and this is the replacement.)
 - **The taskbar is never covered.** The stage is the *work area*, not the full
   display, so the taskbar sits outside the window entirely. The work area's bottom
-  edge is the floor the cat stands and lands on.
-- **It never takes focus.** The window is `focusable: false`, so it cannot steal
+  edge is the floor the cat stands and lands on. It is re-checked every second, so a
+  moved or resized taskbar, a new display or a scale change is followed.
+- **It never takes focus.** The window is not focusable, so it cannot steal
   keystrokes from what you are typing in, and it stays out of Alt-Tab and the
   taskbar.
-- **A wedged pet lets go.** While the cat holds the mouse, the renderer sends the main
-  process a heartbeat. If those stop arriving, or the render process dies, or the
-  window goes unresponsive, the main process forces the window back to click-through.
-  A frozen cat cannot swallow clicks across the screen.
+- **A wedged pet lets go.** While the cat holds the mouse, the page sends the native
+  side a heartbeat. If those stop arriving for 1.5 seconds, the window is forced back
+  to click-through. A frozen cat cannot swallow clicks across the screen.
 - **A lost drag lets go.** A carried cat keeps the window grabbing the mouse, so a
   drag that never ends would lock the desktop out. Releasing the button outside the
   window, or a drag going completely idle for five seconds, both drop the cat.
@@ -129,36 +146,50 @@ shrinking a stage per bite, while the cat works through it.
 ## Layout
 
 ```
-electron/main.js                window, tray and cat menu, app:// protocol, watchdog
-electron/preload.js             the `pet` bridge exposed to the renderer
-electron/_smoke.js              `--smoke` diagnostic: boots, probes, screenshots, quits
+src-tauri/src/main.rs           window, tray and cat menu, cursor poll, watchdog
+src-tauri/src/feed.rs           eating a dropped file: the guards, the dialog, the delete
+src-tauri/tauri.conf.json       app identity, CSP, and the installer config
+src-tauri/capabilities/         what the page is allowed to call (very little)
+src-tauri/windows/hooks.nsh     removes an old Electron install during an upgrade
+src-tauri/Info.plist            macOS: no Dock tile
+src-tauri/icons/                bundle icons, generated by `npm run icons`
 src/index.html                  the stage
+src/bridge.js                   `window.pet`: the page's whole view of the native side
 src/styles.css                  heart float-up animation, treat, drag cursor states
 src/renderer.js                 canvas drawing, cross-fade, per-pixel hit test, dragging
 src/behavior.js                 the brain: a step queue, an energy model and gravity
 src/sprites.js                  manifest loading and frame lookup
 tools/build_assets.py           sheet -> sprite pipeline
-tools/build_icons.py            sprite -> the app icons the installers ship
-tools/build_treat.py            the raw fish drawing -> the treat sprite
+tools/build_icons.py            sprite -> the app icons
+tools/build_treat.py            the raw fish drawing -> the treat sprites
 tools/_simulate.mjs             steps the brain headless and checks it
 assets/sprites/                 generated frames + manifest.json
 icons/                          the heart floated on a click, the fish the cat is fed
 rsrc/raw/                       source sheets
 rsrc/_check/                    QA output
-electron-builder.yml            installer targets, one block per platform
+scripts/stage-web.mjs           copies the page into .web/ for Tauri to embed
 scripts/build-installers.mjs    the packaging entry point
 scripts/build.ps1               the same from a PowerShell prompt
 scripts/build.sh                the same from a shell
-build/                          generated app icons + macOS entitlements
+build/                          generated app icons, including the tray icon
 .github/workflows/release.yml   builds on two runners, publishes the release
 ```
 
-### Why a custom `app://` scheme instead of `file://`
+### How the page is served
 
 The renderer hit-tests the cursor against the cat's alpha channel with
-`getImageData`, which throws on a canvas tainted by `file://` images. Serving
-everything from one privileged scheme gives the page a real origin, keeps the sprites
-same-origin so the canvas stays clean, and lets `fetch` read the manifest.
+`getImageData`, which throws on a canvas tainted by cross-origin images. Tauri serves
+the whole page from its own origin, so the sprites are same-origin, the canvas stays
+clean and `fetch` can read the manifest.
+
+Tauri embeds a single directory, but the page is spread across `src/`,
+`assets/sprites/` and `icons/`. `scripts/stage-web.mjs` copies those three side by
+side into `.web/`, keeping the relative URLs the page already uses, and runs on its
+own before every `npm start` and every build. Pointing Tauri at the repository root
+instead would embed the raw art and the Rust build output along with it.
+
+The Content-Security-Policy is in `tauri.conf.json` rather than a meta tag: it has to
+name the IPC origins, which Tauri needs and which differ per platform.
 
 ### Cross-fading on a transparent window
 
@@ -173,8 +204,7 @@ constant flicker against the desktop.
 ## Checks
 
 ```powershell
-npm run check:behavior   # brain only, 60 simulated minutes plus drag/drop/pause
-npm run check:app        # boots the real window, probes it, then quits
+npm run check:behavior   # brain only, 60 simulated minutes plus drag/drop/pause/feeding
 ```
 
 `check:behavior` runs the brain headless and asserts it never reaches an invalid
@@ -194,61 +224,73 @@ that cancelling, or nobody ever answering, both close the mouth again; that bein
 picked up mid-offer forgets the food; and that nothing leaves the cat stuck in a
 feeding pose afterwards.
 
-`check:app` boots the real app and drives a click through synthetic input events, so
-the per-pixel hit test and the mousedown path are genuinely exercised rather than
-bypassed by calling the brain directly. It also checks that transparent corners of the
-cat's canvas do *not* register as hits, that the cross-fade never dips the cat's
-opacity, that a dropped cat falls monotonically to the floor and startles, and that
-the main process is not holding the mouse once the cursor is away from the cat.
-Screenshots land in `rsrc/_check/electron/`.
+There is no automated check of the running app any more. The Electron build had one
+(`check:app`), but it drove Electron-only APIs -- running script in the page and
+reading the result, screenshotting the window, synthesising input -- that Tauri does
+not have, so it went with Electron. Until there is a replacement, these need trying
+by hand after any change to `src-tauri/` or the hit test:
 
-`check:app` also covers the feeding chain in a real window, including that the treat
-sprite appears with the offer and is gone the frame the food is in the mouth, and it
-checks the rules about what the cat may eat directly -- those rules are the only thing
-between a dropped file and an unrecoverable delete, so they are worth asserting rather
-than reading.
+- Hovering the cat turns the cursor into a hand, clicking it tilts its head, and
+  clicking a transparent corner of its box goes through to whatever is behind.
+- Dragging the cat carries it; letting go drops it and it startles on landing.
+- Right-click opens the menu, and clicking anywhere else closes it again.
+- Give a fish: the fish drops in next to the cat and goes whole, bitten, crumbs.
+- Dragging a scratch file onto the cat opens its mouth, dropping it asks first, and
+  Cancel leaves the file alone.
 
-Three things the automated checks cannot cover: the right-click menu is a native
-popup, real click-through has to be felt rather than measured, and starting a file
-drag is an OS-level operation that `sendInputEvent` cannot begin -- so dragging a real
-file onto the cat needs trying by hand. All three need confirming by hand. Note also
-that launching two instances back to back can collide on the Chromium
-cache directory; the second will exit immediately, so leave a moment between runs.
+A second launch exits straight away and makes the running cat tilt its head.
 
 ## Installers
 
 `npm run dist` builds an actual installer for whichever machine you run it on -- not a
 folder of files to copy about.
 
-| Platform | Artifact | What installing it does |
-| --- | --- | --- |
-| Windows | `desktop-cat-<v>-win-x64-setup.exe` | NSIS wizard: choose per-user or per-machine, choose the location, get Start menu and desktop shortcuts and an entry in Apps & features that uninstalls cleanly |
-| macOS | `desktop-cat-<v>-mac-arm64.dmg` | Disk image you drag to Applications. Runs as a menu-bar accessory with no Dock tile |
+| Platform | Artifact | Size | What installing it does |
+| --- | --- | --- | --- |
+| Windows | `desktop-cat-<v>-win-x64-setup.exe` | ~6 MB | NSIS wizard for the current user: choose the location, get a Start menu shortcut and an entry in Apps & features that uninstalls cleanly |
+| macOS | `desktop-cat-<v>-mac-arm64.dmg` | -- | Disk image you drag to Applications. Runs as a menu-bar accessory with no Dock tile |
 
 Both are built for x64 and arm64, so there is an Apple-silicon and an Intel `.dmg`.
-Everything lands in `dist/` next to a `SHA256SUMS-<platform>.txt`.
+Everything lands in `dist/` next to a `SHA256SUMS-<platform>.txt`. Installed, the
+Windows app is one ~8 MB executable with the page and every sprite embedded in it.
 
-Linux is not packaged. The `.deb`, `.rpm` and `.AppImage` targets were the slowest
-third of every release for the fewest downloads, so they were removed; `npm start`
-still runs the cat from source on Linux.
+The Windows app runs on the system's WebView2. Windows 11 ships it and current
+Windows 10 has it through Edge; on a machine without it the installer downloads it
+first (Tauri's default `downloadBootstrapper` mode), which is why it is not inside
+the installer.
+
+Installing over an older version replaces it. That includes the 1.x Electron builds,
+which were installed under a different uninstall key that this installer would not
+otherwise know about: `src-tauri/windows/hooks.nsh` finds that key, runs the old
+uninstaller silently and waits for it before copying anything, so an upgrade never
+leaves two cats behind.
+
+Linux is not supported: not packaged, not built in CI, and not buildable as things
+stand, since the message-box crate is compiled without its Linux backends.
 
 ```powershell
-npm run dist                               # installers for this machine
+npm run dist                               # installer for this machine and CPU
 npm run dist:win                           # or dist:mac
-npm run pack                               # unpacked app only, for debugging
+npm run pack                               # the app binary only, no installer
+node scripts/build-installers.mjs --win --arch x64 --arch arm64
 node scripts/build-installers.mjs --help
 ```
+
+Each architecture is a separate Rust build and needs its target installed, for
+example `rustup target add aarch64-pc-windows-msvc`; the script names the missing one
+rather than failing halfway through. A release build takes several minutes, most of
+it link-time optimisation in favour of a smaller binary.
 
 If you would rather not go through npm there are wrappers that take the same
 arguments: `.\scripts\build.ps1` on Windows, `bash scripts/build.sh` elsewhere.
 
 ### One installer per operating system
 
-`npm run dist:all` refuses on most machines, and that is the honest answer rather than
-a gap to work around: a `.dmg` is assembled by `hdiutil`, which only exists on macOS.
-The script checks the host before it starts and names the combinations that cannot
-work, so you find out in a second instead of four minutes into a build.
-`--allow-cross` overrides it if you have Wine or a container set up.
+`npm run dist:all` refuses on any single machine, and that is the honest answer
+rather than a gap to work around: a `.dmg` is assembled by `hdiutil`, which only
+exists on macOS, and the Windows build links against MSVC. The script checks the host
+before it starts and names what cannot work, so you find out in a second instead of
+ten minutes into a build.
 
 Getting both in one go is what CI is for.
 
@@ -279,36 +321,34 @@ set up.
 
 ### Signing
 
-The builds are unsigned, so SmartScreen warns on a first Windows run and macOS wants
-**right-click > Open** the first time (or
-`xattr -dr com.apple.quarantine "/Applications/Desktop Cat.app"`). To sign for real,
-add the usual electron-builder variables as repository secrets and pass them into the
+The builds are not code signed, so SmartScreen warns on a first Windows run and macOS
+wants **right-click > Open** the first time (or
+`xattr -dr com.apple.quarantine "/Applications/Desktop Cat.app"`). The macOS app is
+ad-hoc signed (`signingIdentity: "-"`), which is the minimum Apple silicon needs to
+run it at all.
+
+To sign for real, add Tauri's variables as repository secrets and pass them into the
 build step:
 
-- Windows: `WIN_CSC_LINK` (base64 `.pfx`) and `WIN_CSC_KEY_PASSWORD`
-- macOS: `CSC_LINK` (base64 `.p12`) and `CSC_KEY_PASSWORD`; to notarise as well,
-  `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID`, plus
-  `mac.notarize: true` in `electron-builder.yml`
-
-The build script sets `CSC_IDENTITY_AUTO_DISCOVERY=false` whenever none of those are
-set. That is what keeps an unsigned macOS build from stopping to hunt through the
-keychain for an identity it was never going to find.
+- macOS: `APPLE_CERTIFICATE` (base64 `.p12`), `APPLE_CERTIFICATE_PASSWORD` and
+  `APPLE_SIGNING_IDENTITY`; to notarise as well, `APPLE_ID`, `APPLE_PASSWORD` (an
+  app-specific password) and `APPLE_TEAM_ID`
+- Windows: a certificate in the runner's store referenced by
+  `bundle > windows > certificateThumbprint` in `tauri.conf.json`, or a
+  `signCommand` for a cloud signing service
 
 ### What ends up inside
 
-An allow-list in `electron-builder.yml`: `electron/`, `src/`, `assets/sprites/`,
-`icons/` and `package.json`. The Python pipeline, the raw art in `rsrc/` and the checks
-are build-time only and stay out, which is most of the repository by size.
+`src/`, `assets/sprites/` and `icons/`, staged into `.web/` and compiled into the
+executable itself, plus the bundle icons. The Python pipeline, the raw art in `rsrc/`
+and the checks are build-time only and stay out, which is most of the repository by
+size. The tray icon is compiled in too (`build/icons/32x32.png`), so a missing file can
+never leave the tray blank.
 
-All of it goes into `app.asar` with nothing unpacked. That is the reason the tray icon
-is read with `fs.readFileSync` and handed to `nativeImage.createFromBuffer` rather than
-passing the path to `createFromPath`: only Node's `fs` is patched to see inside the
-archive, so a native path loader comes back with an empty image and the tray silently
-loses its icon. The `app://` handler already read through `fs`, so it needed no change.
-
-The app icons in `build/` are generated from the resting sit sprite by `npm run icons`
-(Python, Pillow) and are committed. That is deliberate -- packaging and CI never need
-the Python toolchain. Re-run it after changing the art.
+The app icons in `build/` and `src-tauri/icons/` are generated from the resting sit
+sprite by `npm run icons` (Python with Pillow, then `tauri icon`) and are committed.
+That is deliberate -- packaging and CI never need the Python toolchain. Re-run it
+after changing the art.
 
 ## Rebuilding the sprites
 
